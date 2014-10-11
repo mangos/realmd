@@ -93,8 +93,12 @@ set_target_properties(${EXECUTABLE_NAME} PROPERTIES LINK_FLAGS
 )
 
 install(TARGETS ${EXECUTABLE_NAME} DESTINATION "${BIN_DIR}")
-install(FILES realmd.conf.dist.in DESTINATION "${CONF_DIR}" RENAME realmd.conf.dist)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/realmd.conf.dist.in" "${CMAKE_CURRENT_BINARY_DIR}/realmd.conf.dist")
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/realmd.conf.dist" DESTINATION "${CONF_INSTALL_DIR}")
 
 if(WIN32 AND MSVC)
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/\${BUILD_TYPE}/${EXECUTABLE_NAME}.pdb" DESTINATION "${BIN_DIR}" CONFIGURATIONS Debug)
+  add_custom_command(TARGET ${EXECUTABLE_NAME}
+    POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_BINARY_DIR}/realmd.conf.dist" "${CONF_COPY_DIR}"
+  )
 endif()
