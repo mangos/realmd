@@ -37,13 +37,30 @@ INSTANTIATE_SINGLETON_1(RealmList);
 
 extern DatabaseType LoginDatabase;
 
-// will only support WoW 1.12.1/1.12.2/1.12.3 , WoW:TBC 2.4.3 and official release for WoW:WotLK and later, client builds 10505, 8606, 6141, 6005, 5875
+// will only support WoW 1.12.1/1.12.2/1.12.3, WoW:TBC 2.4.3, WoW:WotLK 3.3.5a and official release for WoW:Cataclysm and later, client builds 15595, 10505, 8606, 6005, 5875
 // if you need more from old build then add it in cases in realmd sources code
 // list sorted from high to low build and first build used as low bound for accepted by default range (any > it will accepted by realmd at least)
 
 static RealmBuildInfo ExpectedRealmdClientBuilds[] =
 {
-    {12340, 3, 3, 5, 'a'},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
+    {18414, 5, 4, 8, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
+    {18291, 5, 4, 8, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
+    {18019, 5, 4, 7, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
+    {17956, 5, 4, 7, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
+    {17930, 5, 4, 7, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
+    {17898, 5, 4, 7, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
+    {17688, 5, 4, 2, 'a'},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
+    {17658, 5, 4, 2, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
+    {17538, 5, 4, 1, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
+    {17128, 5, 3, 0, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
+    {17116, 5, 3, 0, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
+    {17055, 5, 3, 0, ' '},                               	// highest supported build, also auto accept all above for simplify future supported builds testing
+    {16992, 5, 3, 0, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
+    {16357, 5, 1, 0, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
+    {15595, 4, 3, 4, ' '},
+    {15050, 4, 3, 0, ' '},
+    {13623, 4, 0, 6, 'a'},
+    {12340, 3, 3, 5, 'a'},
     {11723, 3, 3, 3, 'a'},
     {11403, 3, 3, 2, ' '},
     {11159, 3, 3, 0, 'a'},
@@ -80,85 +97,21 @@ RealmList& sRealmList
     return realmlist;
 }
 
-RealmVersion RealmList::BelongsToVersion(uint32 build) const
-{
-    RealmBuildVersionMap::const_iterator it;
-    if ((it = m_buildToVersion.find(build)) != m_buildToVersion.end())
-        return it->second;
-    else
-        return REALM_VERSION_VANILLA;
-}
-
-RealmList::RealmListIterators RealmList::GetIteratorsForBuild(uint32 build) const
-{
-    RealmVersion version = BelongsToVersion(build);
-    if (version >= REALM_VERSION_COUNT)
-        return RealmListIterators(
-            m_realmsByVersion[0].end(),
-            m_realmsByVersion[0].end()
-            );
-    return RealmListIterators(
-        m_realmsByVersion[uint32(version)].begin(),
-        m_realmsByVersion[uint32(version)].end()
-        );
-
-}
-
 /// Load the realm list from the database
 void RealmList::Initialize(uint32 updateInterval)
 {
     m_UpdateInterval = updateInterval;
-    
-    InitBuildToVersion();
-    
+
     ///- Get the content of the realmlist table in the database
     UpdateRealms(true);
-}
-
-uint32 RealmList::NumRealmsForBuild(uint32 build) const
-{
-    return m_realmsByVersion[BelongsToVersion(build)].size();
-}
-
-void RealmList::AddRealmToBuildList(const Realm& realm)
-{
-    RealmBuilds builds = realm.realmbuilds;
-    int buildNumber = *(builds.begin());
-    m_realmsByVersion[BelongsToVersion(buildNumber)].push_back(&realm);
-}
-
-void RealmList::InitBuildToVersion()
-{
-    m_buildToVersion[5875] = REALM_VERSION_VANILLA;
-    m_buildToVersion[6005] = REALM_VERSION_VANILLA;
-    m_buildToVersion[6141] = REALM_VERSION_VANILLA;
-    
-    m_buildToVersion[8606] = REALM_VERSION_TBC;
-    
-    m_buildToVersion[10505] = REALM_VERSION_WOTLK;
-    m_buildToVersion[11159] = REALM_VERSION_WOTLK;
-    m_buildToVersion[11403] = REALM_VERSION_WOTLK;
-    m_buildToVersion[11723] = REALM_VERSION_WOTLK;
-    m_buildToVersion[12340] = REALM_VERSION_WOTLK;
-    
-    m_buildToVersion[13623] = REALM_VERSION_CATA;
-    m_buildToVersion[15050] = REALM_VERSION_CATA;
-    m_buildToVersion[15595] = REALM_VERSION_CATA;
-    
-    m_buildToVersion[16357] = REALM_VERSION_MOP;
-    m_buildToVersion[16992] = REALM_VERSION_MOP;
-    m_buildToVersion[17055] = REALM_VERSION_MOP;
-    m_buildToVersion[17116] = REALM_VERSION_MOP;
-    m_buildToVersion[17128] = REALM_VERSION_MOP;
 }
 
 void RealmList::UpdateRealm(uint32 ID, const std::string& name, const std::string& address, uint32 port, uint8 icon, RealmFlags realmflags, uint8 timezone, AccountTypes allowedSecurityLevel, float popu, const std::string& builds)
 {
     ///- Create new if not exist or update existed
     Realm& realm = m_realms[name];
-    
+
     realm.m_ID       = ID;
-    realm.name       = name;
     realm.icon       = icon;
     realm.realmflags = realmflags;
     realm.timezone   = timezone;
@@ -176,13 +129,6 @@ void RealmList::UpdateRealm(uint32 ID, const std::string& name, const std::strin
 
     uint16 first_build = !realm.realmbuilds.empty() ? *realm.realmbuilds.begin() : 0;
 
-    if (first_build)
-        AddRealmToBuildList(realm);
-    else
-        sLog.outError("You don't seem to have added any allowed realmbuilds to the realm: %s"
-                      " and therefore it will not be listed to anyone",
-                      name.c_str());
-    
     realm.realmBuildInfo.build = first_build;
     realm.realmBuildInfo.major_version = 0;
     realm.realmBuildInfo.minor_version = 0;
@@ -210,9 +156,7 @@ void RealmList::UpdateIfNeed()
 
     // Clears Realm list
     m_realms.clear();
-    for (int i = 0; i < REALM_VERSION_COUNT; ++i)
-        m_realmsByVersion[i].clear();
-    
+
     // Get the content of the realmlist table in the database
     UpdateRealms(false);
 }
