@@ -9,7 +9,7 @@
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
  *
- * This program is distributed in the hope that it will be useful,
+ * This program is distributed in the hope that it will be useful,r
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
@@ -190,7 +190,7 @@ extern int main(int argc, char** argv)
 
     sLog.Initialize();
 
-	sLog.outString("%s [realm-daemon]", MANGOS_FULLVERSION(REVISION_DATE, REVISION_TIME, REVISION_NR, REVISION_ID));
+	sLog.outString("%s [realm-daemon]", REVISION_NR);
     sLog.outString("<Ctrl-C> to stop.\n");
     sLog.outString("Using configuration file %s.", cfg_file);
 
