@@ -49,12 +49,14 @@ add_executable(${EXECUTABLE_NAME}
 
 if(NOT ACE_USE_EXTERNAL)
   add_dependencies(${EXECUTABLE_NAME} ace)
+  target_link_libraries(${EXECUTABLE_NAME} ace)
+else()
+  target_link_libraries(${EXECUTABLE_NAME} ACE)
 endif()
 
 target_link_libraries(${EXECUTABLE_NAME}
   shared
   framework
-  ace
 )
 
 if(WIN32)
