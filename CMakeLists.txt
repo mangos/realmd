@@ -82,7 +82,11 @@ endif()
 set(EXECUTABLE_LINK_FLAGS "")
 
 if(UNIX)
-  set(EXECUTABLE_LINK_FLAGS "-Wl,--no-as-needed -ldl -pthread -lrt ${EXECUTABLE_LINK_FLAGS}")
+  if (CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
+    set(EXECUTABLE_LINK_FLAGS "-Wl, --no-as-needed -pthread -lrt ${EXECUTABLE_LINK_FLAGS}")
+  elseif(CMAKE_SYSTEM_NAME MATCHES "Linux")
+    set(EXECUTABLE_LINK_FLAGS "-Wl,--no-as-needed -ldl -pthread -lrt ${EXECUTABLE_LINK_FLAGS}")
+  endif()
 endif()
 
 if(APPLE)
