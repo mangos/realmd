@@ -30,10 +30,10 @@
 #include "Database/DatabaseEnv.h"
 #include "Config/Config.h"
 #include "Log.h"
-#include "RealmList.h"
+#include "Realm/RealmList.h"
 #include "AuthSocket.h"
 #include "AuthCodes.h"
-#include "PatchHandler.h"
+#include "Patch/PatchHandler.h"
 
 #include <openssl/md5.h>
 //#include "Util.h" -- for commented utf8ToUpperOnlyLatin

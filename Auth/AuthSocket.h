@@ -34,7 +34,7 @@
 #include "Auth/Sha1.h"
 #include "ByteBuffer.h"
 
-#include "BufferedSocket.h"
+#include "SocketBuffer/BufferedSocket.h"
 
 /**
  * @brief Handle login commands
