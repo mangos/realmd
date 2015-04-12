@@ -29,6 +29,9 @@
 #ifndef MANGOS_H_REALMLIST
 #define MANGOS_H_REALMLIST
 
+#include <ace/Singleton.h>
+#include <ace/Null_Mutex.h>
+#include <ace/INET_Addr.h>
 #include "Common.h"
 
 /**
@@ -76,7 +79,9 @@ typedef std::set<uint32> RealmBuilds;
 struct Realm
 {
     std::string name;
-    std::string address;
+    ACE_INET_Addr ExternalAddress;
+    ACE_INET_Addr LocalAddress;
+    ACE_INET_Addr LocalSubnetMask;
     uint8 icon;
     RealmFlags realmflags;                                  // realmflags
     uint8 timezone;
@@ -183,7 +188,7 @@ class RealmList
          * @param popu
          * @param builds
          */
-        void UpdateRealm(uint32 ID, const std::string& name, const std::string& address, uint32 port, uint8 icon, RealmFlags realmflags, uint8 timezone, AccountTypes allowedSecurityLevel, float popu, const std::string& builds);
+        void UpdateRealm(uint32 ID, const std::string& name, ACE_INET_Addr const& address, ACE_INET_Addr const& localAddress, ACE_INET_Addr const& localSubnetmask, uint32 port, uint8 icon, RealmFlags realmflags, uint8 timezone, AccountTypes allowedSecurityLevel, float popu, const std::string& builds);
     private:
         RealmMap m_realms;                                    ///< Internal map of realms
         RealmStlList m_realmsByVersion[REALM_VERSION_COUNT]; ///< This sorts the realms by their supported build

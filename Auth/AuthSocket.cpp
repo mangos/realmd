@@ -890,6 +890,28 @@ bool AuthSocket::_HandleReconnectProof()
     }
 }
 
+ACE_INET_Addr const& AuthSocket::GetAddressForClient(Realm const& realm, ACE_INET_Addr const& clientAddr)
+{
+    // Attempt to send best address for client
+    if (clientAddr.is_loopback())
+    {
+        // Try guessing if realm is also connected locally
+        if (realm.LocalAddress.is_loopback() || realm.ExternalAddress.is_loopback())
+            return clientAddr;
+
+        // Assume that user connecting from the machine that authserver is located on
+        // has all realms available in his local network
+        return realm.LocalAddress;
+    }
+
+    // Check if connecting client is in the same network
+    if (IsIPAddrInNetwork(realm.LocalAddress, clientAddr, realm.LocalSubnetMask))
+        return realm.LocalAddress;
+
+    // Return external IP
+        return realm.ExternalAddress;
+}
+
 /// %Realm List command handler
 bool AuthSocket::_HandleRealmList()
 {
@@ -935,6 +957,9 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
     iters = sRealmList.GetIteratorsForBuild(_build);
     uint32 numRealms = sRealmList.NumRealmsForBuild(_build);
     
+    ACE_INET_Addr clientAddr;
+    peer().get_remote_addr(clientAddr);
+
     switch (_build)
     {
         case 5875:                                          // 1.12.1
@@ -948,6 +973,7 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
                  itr != iters.second;
                  ++itr)
             {
+                clientAddr.set_port_number((*itr)->ExternalAddress.get_port_number());
                 uint8 AmountOfCharacters;
                 
                 // No SQL injection. id of realm is controlled by the database.
@@ -982,14 +1008,14 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
                 if (!ok_build || ((*itr)->allowedSecurityLevel > _accountSecurityLevel))
                     realmflags = RealmFlags(realmflags | REALM_FLAG_OFFLINE);
 
-                pkt << uint32((*itr)->icon);              // realm type
-                pkt << uint8(realmflags);                   // realmflags
-                pkt << name;                                // name
-                pkt << (*itr)->address;                   // address
+                pkt << uint32((*itr)->icon);                                        // realm type
+                pkt << uint8(realmflags);                                           // realmflags
+                pkt << name;                                                        // name
+                pkt << GetAddressString(GetAddressForClient((**itr), clientAddr));  // address
                 pkt << float((*itr)->populationLevel);
                 pkt << uint8(AmountOfCharacters);
-                pkt << uint8((*itr)->timezone);           // realm category
-                pkt << uint8(0x00);                         // unk, may be realm number/id?
+                pkt << uint8((*itr)->timezone);                                     // realm category
+                pkt << uint8(0x00);                                                 // unk, may be realm number/id?
             }
 
             pkt << uint16(0x0002);                          // unused value (why 2?)
@@ -1028,6 +1054,7 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
                  itr != iters.second;
                  ++itr)
             {
+                clientAddr.set_port_number((*itr)->ExternalAddress.get_port_number());
                 uint8 AmountOfCharacters;
 
                 // No SQL injection. id of realm is controlled by the database.
@@ -1058,15 +1085,15 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
                 if (!buildInfo)
                     { realmFlags = RealmFlags(realmFlags & ~REALM_FLAG_SPECIFYBUILD); }
 
-                pkt << uint8((*itr)->icon);               // realm type (this is second column in Cfg_Configs.dbc)
-                pkt << uint8(lock);                         // flags, if 0x01, then realm locked
-                pkt << uint8(realmFlags);                   // see enum RealmFlags
-                pkt << (*itr)->name;                            // name
-                pkt << (*itr)->address;                   // address
+                pkt << uint8((*itr)->icon);                                         // realm type (this is second column in Cfg_Configs.dbc)
+                pkt << uint8(lock);                                                 // flags, if 0x01, then realm locked
+                pkt << uint8(realmFlags);                                           // see enum RealmFlags
+                pkt << (*itr)->name;                                                // name
+                pkt << GetAddressString(GetAddressForClient((**itr), clientAddr));  // address
                 pkt << float((*itr)->populationLevel);
                 pkt << uint8(AmountOfCharacters);
-                pkt << uint8((*itr)->timezone);           // realm category (Cfg_Categories.dbc)
-                pkt << uint8(0x2C);                         // unk, may be realm number/id?
+                pkt << uint8((*itr)->timezone);                                     // realm category (Cfg_Categories.dbc)
+                pkt << uint8(0x2C);                                                 // unk, may be realm number/id?
 
                 if (realmFlags & REALM_FLAG_SPECIFYBUILD)
                 {
