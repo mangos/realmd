@@ -33,8 +33,12 @@
 #include "Auth/BigNumber.h"
 #include "Auth/Sha1.h"
 #include "ByteBuffer.h"
+#include "Utilities/Util.h"
 
 #include "SocketBuffer/BufferedSocket.h"
+
+class ACE_INET_Addr;
+struct Realm;
 
 /**
  * @brief Handle login commands
@@ -79,6 +83,8 @@ class AuthSocket: public BufferedSocket
          * @param acctid
          */
         void LoadRealmlist(ByteBuffer& pkt, uint32 acctid);
+
+        static ACE_INET_Addr const& GetAddressForClient(Realm const& realm, ACE_INET_Addr const& clientAddr);
 
         /**
          * @brief
