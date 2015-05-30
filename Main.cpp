@@ -400,7 +400,7 @@ bool StartDB()
         return false;
     }
 
-    if (!LoginDatabase.CheckRequiredField("realmd_db_version", REVISION_DB_REALMD))
+    if (!LoginDatabase.CheckDatabaseVersion(DATABASE_REALMD))
     {
         ///- Wait for already started DB delay threads to end
         LoginDatabase.HaltDelayThread();
