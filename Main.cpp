@@ -189,7 +189,7 @@ extern int main(int argc, char** argv)
 
     sLog.Initialize();
 
-	sLog.outString("%s [realm-daemon]", REVISION_NR);
+    sLog.outString("%s [realm-daemon]", REVISION_NR);
     sLog.outString("<Ctrl-C> to stop.\n");
     sLog.outString("Using configuration file %s.", cfg_file);
 
@@ -197,7 +197,7 @@ extern int main(int argc, char** argv)
     uint32 confVersion = sConfig.GetIntDefault("ConfVersion", 0);
     if (confVersion < REALMD_CONFIG_VERSION)
     {
-		sLog.outError("*****************************************************************************");
+        sLog.outError("*****************************************************************************");
         sLog.outError(" WARNING: Your realmd.conf version indicates your conf file is out of date!");
         sLog.outError("          Please check for updates, as your current default values may cause");
         sLog.outError("          strange behavior.");
