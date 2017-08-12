@@ -23,6 +23,7 @@
 # */
 
 set(EXECUTABLE_NAME realmd)
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR}/cmake)
 
 #Auth Files
 file(GLOB_RECURSE SRC_GRP_AUTH Auth/*.cpp Auth/*.h)
@@ -49,8 +50,25 @@ set(EXECUTABLE_SRCS
 )
 
 if(WIN32)
+include(generate_product_version)
+generate_product_version(
+    VersionFilesOutputVariable
+    NAME "realmd.exe"
+    ICON ${CMAKE_SOURCE_DIR}/src/realmd/realmd.ico
+    VERSION_MAJOR 0
+    VERSION_MINOR 21
+    VERSION_PATH ${BUILD_COUNTER}
+    VERSION_REVISION ${BUILD_REVISION}
+	COMPANY_NAME "getmangos.eu"
+# Do not alter, remove or prevent COMPANY_COPYRIGHT from displaying
+	COMPANY_COPYRIGHT
+	FILE_DESCRIPTION "Mangos Realm Daemon"
+)
+endif()
+
+if(WIN32)
     # add resource file to windows build
-    set(EXECUTABLE_SRCS ${EXECUTABLE_SRCS} realmd.rc)
+    set(EXECUTABLE_SRCS ${EXECUTABLE_SRCS} VersionResource.rc)
 endif()
 
 include_directories(
