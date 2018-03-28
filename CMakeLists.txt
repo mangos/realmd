@@ -50,23 +50,20 @@ set(EXECUTABLE_SRCS
 )
 
 if(WIN32)
-include(generate_product_version)
-generate_product_version(
-    VersionFilesOutputVariable
-    NAME "realmd.exe"
-    ICON ${CMAKE_SOURCE_DIR}/src/realmd/realmd.ico
-    VERSION_MAJOR 0
-    VERSION_MINOR 21
-    VERSION_PATH ${BUILD_COUNTER}
-    VERSION_REVISION ${BUILD_REVISION}
-	COMPANY_NAME "getmangos.eu"
-# Do not alter, remove or prevent COMPANY_COPYRIGHT from displaying
-	COMPANY_COPYRIGHT
-	FILE_DESCRIPTION "Mangos Realm Daemon"
-)
-endif()
-
-if(WIN32)
+    include(generate_product_version)
+    generate_product_version(
+        VersionFilesOutputVariable
+        NAME "realmd.exe"
+        ICON ${CMAKE_SOURCE_DIR}/src/realmd/realmd.ico
+        VERSION_MAJOR 0
+        VERSION_MINOR 21
+        VERSION_PATH ${BUILD_COUNTER}
+        VERSION_REVISION ${BUILD_REVISION}
+        COMPANY_NAME "getmangos.eu"
+        # Do not alter, remove or prevent COMPANY_COPYRIGHT from displaying
+        COMPANY_COPYRIGHT
+        FILE_DESCRIPTION "Mangos Realm Daemon"
+    )
     # add resource file to windows build
     set(EXECUTABLE_SRCS ${EXECUTABLE_SRCS} VersionResource.rc)
 endif()
@@ -89,6 +86,12 @@ include_directories(
 
 add_executable(${EXECUTABLE_NAME} ${EXECUTABLE_SRCS})
 
+target_link_libraries(${EXECUTABLE_NAME}
+    shared
+    framework
+    ${OPENSSL_LIBRARIES}
+)
+
 if(NOT ACE_USE_EXTERNAL)
     add_dependencies(${EXECUTABLE_NAME} ace)
     target_link_libraries(${EXECUTABLE_NAME} ace)
@@ -96,11 +99,6 @@ else()
     target_link_libraries(${EXECUTABLE_NAME} ACE)
 endif()
 
-target_link_libraries(${EXECUTABLE_NAME}
-    shared
-    framework
-    ${OPENSSL_LIBRARIES}
-)
 
 if(POSTGRESQL)
     include_directories(${PostgreSQL_INCLUDE_DIR})
@@ -136,7 +134,4 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/realmd.conf.dist" DESTINATION "${CONF
 
 if(WIN32 AND MSVC)
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/\${BUILD_TYPE}/${EXECUTABLE_NAME}.pdb" DESTINATION "${BIN_DIR}" CONFIGURATIONS Debug)
-    add_custom_command(TARGET ${EXECUTABLE_NAME}
-        POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_BINARY_DIR}/realmd.conf.dist" "${CONF_COPY_DIR}"
-    )
 endif()
