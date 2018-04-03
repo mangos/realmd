@@ -354,7 +354,7 @@ bool AuthSocket::_HandleLogonChallenge()
     _login = (const char*)ch->I;
     _build = ch->build;
     _os = (const char*)ch->os;
-    
+
     if (_os.size() > 4)
         return false;
 
@@ -777,12 +777,12 @@ bool AuthSocket::_HandleReconnectChallenge()
     recv((char*)&buf[4], remaining);
     DEBUG_LOG("[ReconnectChallenge] got full packet, %#04x bytes", ch->size);
     DEBUG_LOG("[ReconnectChallenge] name(%d): '%s'", ch->I_len, ch->I);
-    
+
     _login = (const char*)ch->I;
-    
+
     _safelogin = _login;
     LoginDatabase.escape_string(_safelogin);
-    
+
     EndianConvert(ch->build);
     _build = ch->build;
     _os = (const char*)ch->os;
@@ -792,9 +792,9 @@ bool AuthSocket::_HandleReconnectChallenge()
 
     // Restore string order as its byte order is reversed
     std::reverse(_os.begin(), _os.end());
-    
+
     QueryResult* result = LoginDatabase.PQuery("SELECT sessionkey FROM account WHERE username = '%s'", _safelogin.c_str());
-    
+
     // Stop if the account is not found
     if (!result)
     {
@@ -897,10 +897,10 @@ bool AuthSocket::_HandleRealmList()
     if (recv_len() < 5)
         { return false; }
     recv_skip(5);
-    
+
     ///- Get the user id (else close the connection)
     // No SQL injection (escaped user name)
-    
+
     QueryResult* result = LoginDatabase.PQuery("SELECT id,sha_pass_hash FROM account WHERE username = '%s'", _safelogin.c_str());
     if (!result)
     {
@@ -908,23 +908,23 @@ bool AuthSocket::_HandleRealmList()
         close_connection();
         return false;
     }
-    
+
     uint32 id = (*result)[0].GetUInt32();
     std::string rI = (*result)[1].GetCppString();
     delete result;
-    
+
     ///- Update realm list if need
     sRealmList.UpdateIfNeed();
-    
+
     ///- Circle through realms in the RealmList and construct the return packet (including # of user characters in each realm)
     ByteBuffer pkt;
     LoadRealmlist(pkt, id);
-    
+
     ByteBuffer hdr;
     hdr << (uint8) CMD_REALM_LIST;
     hdr << (uint16)pkt.size();
     hdr.append(pkt);
-    
+
     send((char const*)hdr.contents(), hdr.size());
     return true;
 }
@@ -934,7 +934,7 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
     RealmList::RealmListIterators iters;
     iters = sRealmList.GetIteratorsForBuild(_build);
     uint32 numRealms = sRealmList.NumRealmsForBuild(_build);
-    
+
     ACE_INET_Addr clientAddr;
     peer().get_remote_addr(clientAddr);
 
@@ -946,14 +946,14 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
         {
             pkt << uint32(0);                               // unused value
             pkt << uint8(numRealms);
-            
+
             for (RealmList::RealmStlList::const_iterator itr = iters.first;
                  itr != iters.second;
                  ++itr)
             {
                 clientAddr.set_port_number((*itr)->ExternalAddress.get_port_number());
                 uint8 AmountOfCharacters;
-                
+
                 // No SQL injection. id of realm is controlled by the database.
                 QueryResult* result = LoginDatabase.PQuery("SELECT numchars FROM realmcharacters WHERE realmid = '%d' AND acctid='%u'", (*itr)->m_ID, acctid);
                 if (result)
@@ -964,13 +964,13 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
                 }
                 else
                     AmountOfCharacters = 0;
-                
+
                 bool ok_build = std::find((*itr)->realmbuilds.begin(), (*itr)->realmbuilds.end(), _build) != (*itr)->realmbuilds.end();
-                
+
                 RealmBuildInfo const* buildInfo = ok_build ? FindBuildInfo(_build) : NULL;
                 if (!buildInfo)
                     buildInfo = &(*itr)->realmBuildInfo;
-                
+
                 RealmFlags realmflags = (*itr)->realmflags;
 
                 // 1.x clients not support explicitly REALM_FLAG_SPECIFYBUILD, so manually form similar name as show in more recent clients
@@ -1025,9 +1025,10 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
         case 18414:                                         // 5.4.8
         default:                                            // and later
         {
+            uint16 tempRealm = uint16(numRealms);           // Force the cast here to prevent a compile fail in VS2017/32Bit
             pkt << uint32(0);                               // unused value
-            pkt << uint16(numRealms);
-            
+            pkt << tempRealm;
+
             for (RealmList::RealmStlList::const_iterator itr = iters.first;
                  itr != iters.second;
                  ++itr)
