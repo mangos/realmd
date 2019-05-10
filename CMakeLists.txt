@@ -54,7 +54,7 @@ add_executable(realmd
     ${SRC_GRP_REALM}
     ${SRC_GRP_SOCKB}
     Main.cpp
-    $<$<BOOL:{WIN32}>:
+    $<$<BOOL:${WIN32}>:
         ${CMAKE_CURRENT_BINARY_DIR}/VersionInfo.h
         ${CMAKE_SOURCE_DIR}/cmake/win/VersionInfo.rc
     >
