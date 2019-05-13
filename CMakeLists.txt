@@ -70,6 +70,7 @@ target_link_libraries(realmd
     PUBLIC
         shared
         Threads::Threads
+        DL::DL
 )
 
 install(
