@@ -368,7 +368,9 @@ bool AuthSocket::_HandleLogonChallenge()
     _os = (const char*)ch->os;
 
     if (_os.size() > 4)
+    {
         return false;
+    }
 
     // Restore string order as its byte order is reversed
     std::reverse(_os.begin(), _os.end());
@@ -812,7 +814,9 @@ bool AuthSocket::_HandleReconnectChallenge()
     _os = (const char*)ch->os;
 
     if (_os.size() > 4)
+    {
         return false;
+    }
 
     // Restore string order as its byte order is reversed
     std::reverse(_os.begin(), _os.end());
@@ -903,7 +907,9 @@ ACE_INET_Addr const& AuthSocket::GetAddressForClient(Realm const& realm, ACE_INE
     {
         // Try guessing if realm is also connected locally
         if (realm.LocalAddress.is_loopback() || realm.ExternalAddress.is_loopback())
+        {
             return clientAddr;
+        }
 
         // Assume that user connecting from the machine that authserver is located on
         // has all realms available in his local network
@@ -912,7 +918,9 @@ ACE_INET_Addr const& AuthSocket::GetAddressForClient(Realm const& realm, ACE_INE
 
     // Check if connecting client is in the same network
     if (IsIPAddrInNetwork(realm.LocalAddress, clientAddr, realm.LocalSubnetMask))
+    {
         return realm.LocalAddress;
+    }
 
     // Return external IP
         return realm.ExternalAddress;
@@ -1075,7 +1083,9 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
                     delete result;
                 }
                 else
-                    { AmountOfCharacters = 0; }
+                {
+                    AmountOfCharacters = 0;
+                }
 
                 bool ok_build = std::find((*itr)->realmbuilds.begin(), (*itr)->realmbuilds.end(), _build) != (*itr)->realmbuilds.end();
 

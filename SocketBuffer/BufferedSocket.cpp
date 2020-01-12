@@ -175,7 +175,9 @@ bool BufferedSocket::send(const char* buf, size_t len)
             return false;
         }
         else if (n == len)
-            { return true; }
+        {
+            return true;
+        }
 
         // adjust how much bytes we sent
         message_block.rd_ptr((size_t)n);

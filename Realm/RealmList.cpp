@@ -105,19 +105,25 @@ RealmVersion RealmList::BelongsToVersion(uint32 build) const
 {
     RealmBuildVersionMap::const_iterator it;
     if ((it = m_buildToVersion.find(build)) != m_buildToVersion.end())
+    {
         return it->second;
+    }
     else
+    {
         return REALM_VERSION_VANILLA;
+    }
 }
 
 RealmList::RealmListIterators RealmList::GetIteratorsForBuild(uint32 build) const
 {
     RealmVersion version = BelongsToVersion(build);
     if (version >= REALM_VERSION_COUNT)
+    {
         return RealmListIterators(
             m_realmsByVersion[0].end(),
             m_realmsByVersion[0].end()
             );
+    }
     return RealmListIterators(
         m_realmsByVersion[uint32(version)].begin(),
         m_realmsByVersion[uint32(version)].end()
