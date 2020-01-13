@@ -985,9 +985,7 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
             pkt << uint32(0);                               // unused value
             pkt << uint8(numRealms);
 
-            for (RealmList::RealmStlList::const_iterator itr = iters.first;
-                 itr != iters.second;
-                 ++itr)
+            for (RealmList::RealmStlList::const_iterator itr = iters.first; itr != iters.second; ++itr)
             {
                 clientAddr.set_port_number((*itr)->ExternalAddress.get_port_number());
                 uint8 AmountOfCharacters;
@@ -1067,9 +1065,7 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
             pkt << uint32(0);                               // unused value
             pkt << tempRealm;
 
-            for (RealmList::RealmStlList::const_iterator itr = iters.first;
-                 itr != iters.second;
-                 ++itr)
+            for (RealmList::RealmStlList::const_iterator itr = iters.first; itr != iters.second; ++itr)
             {
                 clientAddr.set_port_number((*itr)->ExternalAddress.get_port_number());
                 uint8 AmountOfCharacters;

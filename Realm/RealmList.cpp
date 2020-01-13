@@ -242,7 +242,9 @@ void RealmList::UpdateIfNeed()
     // Clears Realm list
     m_realms.clear();
     for (int i = 0; i < REALM_VERSION_COUNT; ++i)
+    {
         m_realmsByVersion[i].clear();
+    }
 
     // Get the content of the realmlist table in the database
     UpdateRealms(false);
