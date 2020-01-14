@@ -144,7 +144,9 @@ int PatchHandler::svc(void)
 PatchCache::~PatchCache()
 {
     for (Patches::iterator i = patches_.begin(); i != patches_.end(); ++i)
-        { delete i->second; }
+    {
+        delete i->second;
+    }
 }
 
 PatchCache::PatchCache()

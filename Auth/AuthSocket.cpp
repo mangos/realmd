@@ -519,7 +519,9 @@ bool AuthSocket::_HandleLogonChallenge()
 
                     _localizationName.resize(4);
                     for (int i = 0; i < 4; ++i)
-                        { _localizationName[i] = ch->country[4 - i - 1]; }
+                    {
+                        _localizationName[i] = ch->country[4 - i - 1];
+                    }
 
                     BASIC_LOG("[AuthChallenge] account %s is using '%c%c%c%c' locale (%u)", _login.c_str(), ch->country[3], ch->country[2], ch->country[1], ch->country[0], GetLocaleByName(_localizationName));
 
