@@ -127,10 +127,14 @@ ssize_t BufferedSocket::noblk_send(ACE_Message_Block& message_block)
     {
         if (errno == EWOULDBLOCK)
             // Blocking signal
-            { return 0; }
+        {
+            return 0;
+        }
         else
             // Error
-            { return -1; }
+        {
+            return -1;
+        }
     }
     else if (n == 0)
     {

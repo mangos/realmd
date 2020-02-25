@@ -49,12 +49,16 @@ struct RealmBuildInfo
 
 enum RealmVersion
 {
-    REALM_VERSION_VANILLA = 0,
-    REALM_VERSION_TBC     = 1,
-    REALM_VERSION_WOTLK   = 2,
-    REALM_VERSION_CATA    = 3,
-    REALM_VERSION_MOP     = 4,
-    REALM_VERSION_COUNT   = 5
+    REALM_VERSION_VANILLA     = 0,
+    REALM_VERSION_TBC         = 1,
+    REALM_VERSION_WOTLK       = 2,
+    REALM_VERSION_CATA        = 3,
+    REALM_VERSION_MOP         = 4,
+    REALM_VERSION_WOD         = 5,
+    REALM_VERSION_LEGION      = 6,
+    REALM_VERSION_BFA         = 7,
+    REALM_VERSION_SHADOWLANDS = 8,
+    REALM_VERSION_COUNT       = 9
 };
 
 /**

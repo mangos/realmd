@@ -43,32 +43,19 @@ extern DatabaseType LoginDatabase;
 
 static const RealmBuildInfo ExpectedRealmdClientBuilds[] =
 {
-    {18414, 5, 4, 8, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
-    {18291, 5, 4, 8, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
-    {18019, 5, 4, 7, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
-    {17956, 5, 4, 7, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
-    {17930, 5, 4, 7, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
-    {17898, 5, 4, 7, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
-    {17688, 5, 4, 2, 'a'},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
-    {17658, 5, 4, 2, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
-    {17538, 5, 4, 1, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
-    {17128, 5, 3, 0, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
-    {17116, 5, 3, 0, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
-    {17055, 5, 3, 0, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
-    {16992, 5, 3, 0, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
-    {16357, 5, 1, 0, ' '},                                  // highest supported build, also auto accept all above for simplify future supported builds testing
-    {15595, 4, 3, 4, ' '},
-    {15050, 4, 3, 0, ' '},
-    {13623, 4, 0, 6, 'a'},
-    {12340, 3, 3, 5, 'a'},
-    {11723, 3, 3, 3, 'a'},
-    {11403, 3, 3, 2, ' '},
-    {11159, 3, 3, 0, 'a'},
-    {10505, 3, 2, 2, 'a'},
-    {8606,  2, 4, 3, ' '},
-    {6141,  1, 12, 3, ' '},
-    {6005,  1, 12, 2, ' '},
-    {5875,  1, 12, 1, ' '},
+    // highest supported build, also auto accept all above for simplify future supported builds testing
+    {40000, 9, 0, 0, ' '},  // SHADOWLANDS
+    {32790, 8, 2, 5, ' '},  // BFA
+    {25549, 7, 3, 2, ' '},  // Legion
+    {21742, 6, 2, 4, ' '},  // WOD
+    {18414, 5, 4, 8, ' '},  // MOP
+    {18273, 5, 4, 8, ' '},  // MOP
+    {15595, 4, 3, 4, ' '},  // CATA
+    {12340, 3, 3, 5, 'a'},  // WOTLK
+    {8606,  2, 4, 3, ' '},  // TBC
+    {6141,  1, 12, 3, ' '}, // Vanilla - Chinese
+    {6005,  1, 12, 2, ' '}, // Vanilla - Spanish
+    {5875,  1, 12, 1, ' '}, // Vanilla
     {0,     0, 0, 0, ' '}                                   // terminator
 };
 
@@ -162,21 +149,20 @@ void RealmList::InitBuildToVersion()
 
     m_buildToVersion[8606] = REALM_VERSION_TBC;
 
-    m_buildToVersion[10505] = REALM_VERSION_WOTLK;
-    m_buildToVersion[11159] = REALM_VERSION_WOTLK;
-    m_buildToVersion[11403] = REALM_VERSION_WOTLK;
-    m_buildToVersion[11723] = REALM_VERSION_WOTLK;
     m_buildToVersion[12340] = REALM_VERSION_WOTLK;
 
-    m_buildToVersion[13623] = REALM_VERSION_CATA;
-    m_buildToVersion[15050] = REALM_VERSION_CATA;
     m_buildToVersion[15595] = REALM_VERSION_CATA;
 
-    m_buildToVersion[16357] = REALM_VERSION_MOP;
-    m_buildToVersion[16992] = REALM_VERSION_MOP;
-    m_buildToVersion[17055] = REALM_VERSION_MOP;
-    m_buildToVersion[17116] = REALM_VERSION_MOP;
-    m_buildToVersion[17128] = REALM_VERSION_MOP;
+    m_buildToVersion[18273] = REALM_VERSION_MOP;
+    m_buildToVersion[18414] = REALM_VERSION_MOP;
+
+    m_buildToVersion[21742] = REALM_VERSION_WOD;
+
+    m_buildToVersion[25549] = REALM_VERSION_LEGION;
+
+    m_buildToVersion[32790] = REALM_VERSION_BFA;
+
+    m_buildToVersion[40000] = REALM_VERSION_SHADOWLANDS;
 }
 
 void RealmList::UpdateRealm(uint32 ID, const std::string& name, ACE_INET_Addr const& address, ACE_INET_Addr const& localAddr, ACE_INET_Addr const& localSubmask, uint32 port, uint8 icon, RealmFlags realmflags, uint8 timezone, AccountTypes allowedSecurityLevel, float popu, const std::string& builds)
@@ -204,12 +190,14 @@ void RealmList::UpdateRealm(uint32 ID, const std::string& name, ACE_INET_Addr co
     uint16 first_build = !realm.realmbuilds.empty() ? *realm.realmbuilds.begin() : 0;
 
     if (first_build)
+    {
         AddRealmToBuildList(realm);
+    }
     else
+    {
         sLog.outError("You don't seem to have added any allowed realmbuilds to the realm: %s"
-                      " and therefore it will not be listed to anyone",
-                      name.c_str());
-
+                      " and therefore it will not be listed to anyone", name.c_str());
+    }
     realm.realmBuildInfo.build = first_build;
     realm.realmBuildInfo.major_version = 0;
     realm.realmBuildInfo.minor_version = 0;

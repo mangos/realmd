@@ -273,28 +273,14 @@ void AuthSocket::SendProof(Sha1Hash sha)
             break;
         }
         case 8606:                                          // 2.4.3
-        case 10505:                                         // 3.2.2a
-        case 11159:                                         // 3.3.0a
-        case 11403:                                         // 3.3.2
-        case 11723:                                         // 3.3.3a
         case 12340:                                         // 3.3.5a
-        case 13623:                                         // 4.0.6a
-        case 15050:                                         // 4.3.0
         case 15595:                                         // 4.3.4
-        case 16357:                                         // 5.1.0
-        case 16992:                                         // 5.3.0
-        case 17055:                                         // 5.3.0
-        case 17116:                                         // 5.3.0
-        case 17128:                                         // 5.3.0
-        case 17538:                                         // 5.4.1
-        case 17658:                                         // 5.4.2
-        case 17688:                                         // 5.4.2a
-        case 17898:                                         // 5.4.7
-        case 17930:                                         // 5.4.7
-        case 17956:                                         // 5.4.7
-        case 18019:                                         // 5.4.7
-        case 18291:                                         // 5.4.8
+        case 18273:                                         // 5.4.8
         case 18414:                                         // 5.4.8
+        case 21742:                                         // 6.2.4
+        case 25549:                                         // 7.3.2
+        case 32790:                                         // 8.2.5
+        case 40000:                                         // 9.0.0
         default:                                            // or later
         {
             sAuthLogonProof_S proof;
@@ -886,7 +872,9 @@ bool AuthSocket::_HandleReconnectProof()
         //If we keep from sending this we don't receive Session Expired on the client when
         //changing realms after being logged on to the world
         if (_build > 6141) // Last vanilla, 1.12.3
+        {
             pkt << (uint16) 0x00;                               // 2 bytes zeros
+        }
         send((char const*)pkt.contents(), pkt.size());
 
         ///- Set _status to authenticated!
@@ -1001,13 +989,17 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
                     delete result;
                 }
                 else
+                {
                     AmountOfCharacters = 0;
+                }
 
                 bool ok_build = std::find((*itr)->realmbuilds.begin(), (*itr)->realmbuilds.end(), _build) != (*itr)->realmbuilds.end();
 
                 RealmBuildInfo const* buildInfo = ok_build ? FindBuildInfo(_build) : NULL;
                 if (!buildInfo)
+                {
                     buildInfo = &(*itr)->realmBuildInfo;
+                }
 
                 RealmFlags realmflags = (*itr)->realmflags;
 
@@ -1022,7 +1014,9 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
 
                 // Show offline state for unsupported client builds and locked realms (1.x clients not support locked state show)
                 if (!ok_build || ((*itr)->allowedSecurityLevel > _accountSecurityLevel))
+                {
                     realmflags = RealmFlags(realmflags | REALM_FLAG_OFFLINE);
+                }
 
                 pkt << uint32((*itr)->icon);                                        // realm type
                 pkt << uint8(realmflags);                                           // realmflags
@@ -1039,28 +1033,14 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
         }
 
         case 8606:                                          // 2.4.3
-        case 10505:                                         // 3.2.2a
-        case 11159:                                         // 3.3.0a
-        case 11403:                                         // 3.3.2
-        case 11723:                                         // 3.3.3a
         case 12340:                                         // 3.3.5a
-        case 13623:                                         // 4.0.6a
-        case 15050:                                         // 4.3.0
         case 15595:                                         // 4.3.4
-        case 16357:                                         // 5.1.0
-        case 16992:                                         // 5.3.0
-        case 17055:                                         // 5.3.0
-        case 17116:                                         // 5.3.0
-        case 17128:                                         // 5.3.0
-        case 17538:                                         // 5.4.1
-        case 17658:                                         // 5.4.2
-        case 17688:                                         // 5.4.2a
-        case 17898:                                         // 5.4.7
-        case 17930:                                         // 5.4.7
-        case 17956:                                         // 5.4.7
-        case 18019:                                         // 5.4.7
-        case 18291:                                         // 5.4.8
+        case 18273:                                         // 5.4.8
         case 18414:                                         // 5.4.8
+        case 21742:                                         // 6.2.4
+        case 25549:                                         // 7.3.2
+        case 32790:                                         // 8.2.5
+        case 40000:                                         // 9.0.0
         default:                                            // and later
         {
             uint16 tempRealm = uint16(numRealms);           // Force the cast here to prevent a compile fail in VS2017/32Bit
