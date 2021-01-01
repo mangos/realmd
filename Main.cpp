@@ -119,15 +119,23 @@ extern int main(int argc, char** argv)
                 const char* mode = cmd_opts.opt_arg();
 
                 if (!strcmp(mode, "run"))
-                    { serviceDaemonMode = 'r'; }
+                {
+                    serviceDaemonMode = 'r';
+                }
 #ifdef WIN32
                 else if (!strcmp(mode, "install"))
-                    { serviceDaemonMode = 'i'; }
+                {
+                    serviceDaemonMode = 'i';
+                }
                 else if (!strcmp(mode, "uninstall"))
-                    { serviceDaemonMode = 'u'; }
+                {
+                    serviceDaemonMode = 'u';
+                }
 #else
                 else if (!strcmp(mode, "stop"))
-                    { serviceDaemonMode = 's'; }
+                {
+                    serviceDaemonMode = 's';
+                }
 #endif
                 else
                 {
@@ -156,11 +164,15 @@ extern int main(int argc, char** argv)
     {
         case 'i':
             if (WinServiceInstall())
-                { sLog.outString("Installing service"); }
+            {
+                sLog.outString("Installing service");
+            }
             return 1;
         case 'u':
             if (WinServiceUninstall())
-                { sLog.outString("Uninstalling service"); }
+            {
+                sLog.outString("Uninstalling service");
+            }
             return 1;
         case 'r':
             WinServiceRun();
@@ -300,9 +312,13 @@ extern int main(int argc, char** argv)
                 else
                 {
                     if (SetProcessAffinityMask(hProcess, curAff))
-                        { sLog.outString("Using processors (bitmask, hex): %x", curAff); }
+                    {
+                        sLog.outString("Using processors (bitmask, hex): %x", curAff);
+                    }
                     else
-                        { sLog.outError("Can't set used processors (hex): %x", curAff); }
+                    {
+                        sLog.outError("Can't set used processors (hex): %x", curAff);
+                    }
                 }
             }
             sLog.outString();
@@ -313,9 +329,13 @@ extern int main(int argc, char** argv)
         if (Prio)
         {
             if (SetPriorityClass(hProcess, HIGH_PRIORITY_CLASS))
-                { sLog.outString("realmd process priority class set to HIGH"); }
+            {
+                sLog.outString("realmd process priority class set to HIGH");
+            }
             else
-                { sLog.outError("Can't set realmd process priority class."); }
+            {
+                sLog.outError("Can't set realmd process priority class.");
+            }
             sLog.outString();
         }
     }
@@ -338,7 +358,9 @@ extern int main(int argc, char** argv)
         ACE_Time_Value interval(0, 100000);
 
         if (ACE_Reactor::instance()->run_reactor_event_loop(interval) == -1)
-            { break; }
+        {
+            break;
+        }
 
         if ((++loopCounter) == numLoops)
         {
@@ -347,7 +369,10 @@ extern int main(int argc, char** argv)
             LoginDatabase.Ping();
         }
 #ifdef WIN32
-        if (m_ServiceStatus == 0) { stopEvent = true; }
+        if (m_ServiceStatus == 0)
+        {
+            stopEvent = true;
+        }
         while (m_ServiceStatus == 2) { Sleep(1000); }
 #endif
     }
