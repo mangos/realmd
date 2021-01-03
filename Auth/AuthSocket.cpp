@@ -376,13 +376,22 @@ bool AuthSocket::_HandleLogonChallenge()
     // No SQL injection possible (paste the IP address as passed by the socket)
     std::string address = get_remote_address();
     LoginDatabase.escape_string(address);
-    QueryResult* result = LoginDatabase.PQuery("SELECT `unbandate` FROM `ip_banned` WHERE "
+    QueryResult* result = LoginDatabase.PQuery("SELECT `bandate`,`unbandate` FROM `ip_banned` WHERE "
                           //    permanent                    still banned
                           "(`unbandate` = `bandate` OR `unbandate` > UNIX_TIMESTAMP()) AND `ip` = '%s'", address.c_str());
     if (result)
     {
-        pkt << (uint8)WOW_FAIL_BANNED;
-        BASIC_LOG("[AuthChallenge] Banned ip %s tries to login!", get_remote_address().c_str());
+        if ((*result)[0].GetUInt64() == (*result)[1].GetUInt64())
+        {
+            pkt << (uint8)WOW_FAIL_BANNED;
+            BASIC_LOG("[AuthChallenge] Banned IP %s tries to login!", get_remote_address().c_str());
+        }
+        else
+        {
+            pkt << (uint8)WOW_FAIL_SUSPENDED;
+            BASIC_LOG("[AuthChallenge] Temporarily banned IP %s tries to login!", get_remote_address().c_str());
+        }
+
         delete result;
     }
     else
