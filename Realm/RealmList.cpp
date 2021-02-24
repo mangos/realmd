@@ -45,8 +45,8 @@ static const RealmBuildInfo ExpectedRealmdClientBuilds[] =
 {
     // highest supported build, also auto accept all above for simplify future supported builds testing
     {40000, 9, 0, 0, ' '},  // SHADOWLANDS
-    {32790, 8, 2, 5, ' '},  // BFA
-    {25549, 7, 3, 2, ' '},  // Legion
+    {35662, 8, 3, 7, ' '},  // BFA
+    {26972, 7, 3, 5, ' '},  // Legion
     {21742, 6, 2, 4, ' '},  // WOD
     {18414, 5, 4, 8, ' '},  // MOP
     {18273, 5, 4, 8, ' '},  // MOP
@@ -158,9 +158,9 @@ void RealmList::InitBuildToVersion()
 
     m_buildToVersion[21742] = REALM_VERSION_WOD;
 
-    m_buildToVersion[25549] = REALM_VERSION_LEGION;
+    m_buildToVersion[26972] = REALM_VERSION_LEGION;
 
-    m_buildToVersion[32790] = REALM_VERSION_BFA;
+    m_buildToVersion[35662] = REALM_VERSION_BFA;
 
     m_buildToVersion[40000] = REALM_VERSION_SHADOWLANDS;
 }
