@@ -108,8 +108,8 @@ ConfVersion=@MANGOS_REALM_VER@
 #
 #    StrictVersionCheck
 #        Description: Prevent modified clients from connnecting
-#        Default: 1 - (Enabled)
-#                 0 - (Disabled)
+#        Default: 0 - (Disabled)
+#                 1 - (Enabled)
 #
 ################################################################################
 LoginDatabaseInfo      = "127.0.0.1;3306;root;mangos;realmd"
@@ -136,4 +136,4 @@ WrongPass.MaxCount     = 3
 WrongPass.BanTime      = 300
 WrongPass.BanType      = 0
 
-StrictVersionCheck     = 1
+StrictVersionCheck     = 0
