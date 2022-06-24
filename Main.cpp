@@ -31,11 +31,14 @@
 #include "Realm/RealmList.h"
 
 #include "Config/Config.h"
+#include "GitRevision.h"
 #include "Log.h"
 #include "Auth/AuthSocket.h"
 #include "SystemConfig.h"
 #include "revision.h"
+#include "revision_data.h"
 #include "Util.h"
+
 #include <openssl/opensslv.h>
 #include <openssl/crypto.h>
 
@@ -202,6 +205,7 @@ extern int main(int argc, char** argv)
     sLog.Initialize();
 
     sLog.outString("%s [realm-daemon]", REVISION_NR);
+    sLog.outString("%s", GitRevision::GetFullRevision());
     sLog.outString("<Ctrl-C> to stop.\n");
     sLog.outString("Using configuration file %s.", cfg_file);
 
@@ -217,7 +221,7 @@ extern int main(int argc, char** argv)
         Log::WaitBeforeContinueIfNeed();
     }
 
-    DETAIL_LOG("%s (Library: %s)", OPENSSL_VERSION_TEXT, SSLeay_version(SSLEAY_VERSION));
+    DETAIL_LOG("Using SSL version: %s (Library: %s)", OPENSSL_VERSION_TEXT, SSLeay_version(SSLEAY_VERSION));
     if (SSLeay() < 0x009080bfL)
     {
         DETAIL_LOG("WARNING: Outdated version of OpenSSL lib. Logins to server may not work!");
