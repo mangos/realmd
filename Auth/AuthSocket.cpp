@@ -27,6 +27,7 @@
 */
 
 #include "Common.h"
+#include "md5.h"
 #include "Database/DatabaseEnv.h"
 #include "Config/Config.h"
 #include "Log.h"
@@ -35,7 +36,7 @@
 #include "AuthCodes.h"
 #include "Patch/PatchHandler.h"
 
-#include <openssl/md5.h>
+
 //#include "Util.h" -- for commented utf8ToUpperOnlyLatin
 
 #include <ace/OS_NS_unistd.h>
@@ -247,15 +248,14 @@ void AuthSocket::_SetVSFields(const std::string& rI)
     x.SetBinary(sha.GetDigest(), sha.GetLength());
     v = g.ModExp(x, N);
     // No SQL injection (username escaped)
-    const char* v_hex, *s_hex;
+    const unsigned char* v_hex, *s_hex;
     v_hex = v.AsHexStr();
     s_hex = s.AsHexStr();
     LoginDatabase.PExecute("UPDATE `account` SET `v` = '%s', `s` = '%s' WHERE `username` = '%s'", v_hex, s_hex, _safelogin.c_str());
-    OPENSSL_free((void*)v_hex);
-    OPENSSL_free((void*)s_hex);
+
 }
 
-void AuthSocket::SendProof(Sha1Hash sha)
+void AuthSocket::SendProof(const unsigned char* sha)
 {
     switch (_build)
     {
@@ -264,7 +264,7 @@ void AuthSocket::SendProof(Sha1Hash sha)
         case 6141:                                          // 1.12.3
         {
             sAuthLogonProof_S_BUILD_6005 proof;
-            memcpy(proof.M2, sha.GetDigest(), 20);
+            memcpy(proof.M2, sha, 20);
             proof.cmd = CMD_AUTH_LOGON_PROOF;
             proof.error = 0;
             proof.unk2 = 0x00;
@@ -284,7 +284,7 @@ void AuthSocket::SendProof(Sha1Hash sha)
         default:                                            // or later
         {
             sAuthLogonProof_S proof;
-            memcpy(proof.M2, sha.GetDigest(), 20);
+            memcpy(proof.M2, sha, 20);
             proof.cmd = CMD_AUTH_LOGON_PROOF;
             proof.error = 0;
             proof.accountFlags = ACCOUNT_FLAG_PROPASS;
@@ -693,16 +693,16 @@ bool AuthSocket::_HandleLogonProof()
 
         ///- Update the sessionkey, last_ip, last login time and reset number of failed logins in the account table for this account
         // No SQL injection (escaped user name) and IP address as received by socket
-        const char* K_hex = K.AsHexStr();
+        const unsigned char* K_hex = K.AsHexStr();
         LoginDatabase.PExecute("UPDATE `account` SET `sessionkey` = '%s', `last_ip` = '%s', `last_login` = NOW(), `locale` = '%u', `os` = '%s', `failed_logins` = 0 WHERE `username` = '%s'", K_hex, get_remote_address().c_str(), GetLocaleByName(_localizationName), _os.c_str(), _safelogin.c_str());
-        OPENSSL_free((void*)K_hex);
+  
 
         ///- Finish SRP6 and send the final result to the client
         sha.Initialize();
         sha.UpdateBigNumbers(&A, &M, &K, NULL);
         sha.Finalize();
 
-        SendProof(sha);
+        SendProof(sha.GetDigest());
 
         ///- Set _status to authenticated
         _status = STATUS_AUTHED;
