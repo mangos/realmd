@@ -75,7 +75,7 @@ class AuthSocket: public BufferedSocket
          *
          * @param sha
          */
-        void SendProof(Sha1Hash sha);
+        void SendProof(const unsigned char*);
         /**
          * @brief
          *

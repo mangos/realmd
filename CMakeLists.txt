@@ -64,14 +64,12 @@ target_include_directories(realmd
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_BINARY_DIR}/VersionInfo.h
-        ${OPENSSL_INCLUDE_DIR}
 )
 
 target_link_libraries(realmd
     PUBLIC
         shared
         Threads::Threads
-        ${OPENSSL_LIBRARIES}
 )
 
 install(

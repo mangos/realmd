@@ -35,10 +35,8 @@
 #include <ace/SOCK_Stream.h>
 #include <ace/Message_Block.h>
 #include <ace/Auto_Ptr.h>
+#include "md5.h"
 #include <map>
-
-#include <openssl/bn.h>
-#include <openssl/md5.h>
 
 /**
  * @brief Caches MD5 hash of client patches present on the server
