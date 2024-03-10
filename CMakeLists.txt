@@ -60,6 +60,9 @@ add_executable(realmd
     >
 )
 
+target_compile_features(realmd PUBLIC cxx_std_17)
+set_target_properties(realmd PROPERTIES CXX_EXTENSIONS OFF)
+
 target_include_directories(realmd
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
