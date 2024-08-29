@@ -106,6 +106,11 @@ ConfVersion=@MANGOS_REALM_VER@
 #        Default: 0 (Ban IP)
 #                 1 (Ban Account)
 #
+#    StrictVersionCheck
+#        Description: Prevent modified clients from connnecting
+#        Default: 0 - (Disabled)
+#                 1 - (Enabled)
+#
 ################################################################################
 LoginDatabaseInfo      = "127.0.0.1;3306;root;mangos;realmd"
 LogsDir                = ""
@@ -130,3 +135,5 @@ RealmsStateUpdateDelay = 20
 WrongPass.MaxCount     = 3
 WrongPass.BanTime      = 300
 WrongPass.BanType      = 0
+
+StrictVersionCheck     = 0

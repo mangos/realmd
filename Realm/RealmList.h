@@ -34,6 +34,8 @@
 #include <ace/INET_Addr.h>
 #include "Common.h"
 
+#include <array>
+
 /**
  * @brief
  *
@@ -45,6 +47,9 @@ struct RealmBuildInfo
     int minor_version; /**< TODO */
     int bugfix_version; /**< TODO */
     int hotfix_version; /**< TODO */
+
+    std::array<uint8, 20> WindowsHash;
+    std::array<uint8, 20> MacHash;
 };
 
 enum RealmVersion
