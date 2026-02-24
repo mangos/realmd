@@ -95,7 +95,7 @@ typedef struct AUTH_LOGON_PROOF_S
     uint8   M2[20];
     uint32  accountFlags;                                   // see enum AccountFlags
     uint32  surveyId;                                       // SurveyId
-    uint16  unkFlags;                                       // some flags (AccountMsgAvailable = 0x01)
+    uint16  LoginFlags;                                     // some flags (AccountMsgAvailable = 0x01)
 } sAuthLogonProof_S;
 
 typedef struct AUTH_LOGON_PROOF_S_BUILD_6005
@@ -140,6 +140,7 @@ typedef struct AuthHandler
 #pragma pack(pop)
 #endif
 
+std::array<uint8, 16> VersionChallenge = { { 0xBA, 0xA3, 0x1E, 0x99, 0xA0, 0x0B, 0x21, 0x57, 0xFC, 0x37, 0x3F, 0xB3, 0x69, 0xCD, 0xD2, 0xF1 } };
 
 /// Constructor - set the N and g values for SRP6
 AuthSocket::AuthSocket() : _status(STATUS_CHALLENGE), _accountSecurityLevel(SEC_PLAYER), _build(0), patch_(ACE_INVALID_HANDLE)
@@ -289,7 +290,7 @@ void AuthSocket::SendProof(Sha1Hash sha)
             proof.error = 0;
             proof.accountFlags = ACCOUNT_FLAG_PROPASS;
             proof.surveyId = 0x00000000;
-            proof.unkFlags = 0x0000;
+            proof.LoginFlags = 0x0000;
 
             send((char*)&proof, sizeof(proof));
             break;
@@ -467,9 +468,6 @@ bool AuthSocket::_HandleLogonChallenge()
 
                     MANGOS_ASSERT(gmod.GetNumBytes() <= 32);
 
-                    BigNumber unk3;
-                    unk3.SetRand(16 * 8);
-
                     ///- Fill the response packet with the result
                     pkt << uint8(WOW_SUCCESS);
 
@@ -480,7 +478,7 @@ bool AuthSocket::_HandleLogonChallenge()
                     pkt << uint8(32);
                     pkt.append(N.AsByteArray(32), 32);
                     pkt.append(s.AsByteArray(), s.GetNumBytes());// 32 bytes
-                    pkt.append(unk3.AsByteArray(16), 16);
+                    pkt.append(VersionChallenge.data(), VersionChallenge.size());
                     uint8 securityFlags = 0;
                     pkt << uint8(securityFlags);            // security flags (0x0...0x04)
 
@@ -689,6 +687,14 @@ bool AuthSocket::_HandleLogonProof()
     ///- Check if SRP6 results match (password is correct), else send an error
     if (!memcmp(M.AsByteArray(), lp.M1, 20))
     {
+        if (!VerifyVersion(lp.A, sizeof(lp.A), lp.crc_hash, false))
+        {
+            char data[2] = { CMD_AUTH_LOGON_PROOF, WOW_FAIL_VERSION_INVALID };
+            send(data, sizeof(data));
+            
+            return true;
+        }
+
         BASIC_LOG("User '%s' successfully authenticated", _login.c_str());
 
         ///- Update the sessionkey, last_ip, last login time and reset number of failed logins in the account table for this account
@@ -863,8 +869,8 @@ bool AuthSocket::_HandleReconnectChallenge()
     pkt << (uint8)  CMD_AUTH_RECONNECT_CHALLENGE;
     pkt << (uint8)  0x00;
     _reconnectProof.SetRand(16 * 8);
-    pkt.append(_reconnectProof.AsByteArray(16), 16);        // 16 bytes random
-    pkt << (uint64) 0x00 << (uint64) 0x00;                  // 16 bytes zeros
+    pkt.append(_reconnectProof.AsByteArray(16), 16);              // 16 bytes random
+    pkt.append(VersionChallenge.data(), VersionChallenge.size()); // 16 bytes zeros
     send((char const*)pkt.contents(), pkt.size());
     return true;
 }
@@ -898,6 +904,15 @@ bool AuthSocket::_HandleReconnectProof()
 
     if (!memcmp(sha.GetDigest(), lp.R2, SHA_DIGEST_LENGTH))
     {
+        if (!VerifyVersion(lp.R1, sizeof(lp.R1), lp.R3, true))
+        {
+            ByteBuffer pkt;
+            pkt << uint8(CMD_AUTH_RECONNECT_PROOF);
+            pkt << uint8(WOW_FAIL_VERSION_INVALID);
+            send((char const*)pkt.contents(), pkt.size());
+            return true;
+        }
+
         ///- Sending response
         ByteBuffer pkt;
         pkt << (uint8)  CMD_AUTH_RECONNECT_PROOF;
@@ -1222,3 +1237,52 @@ void AuthSocket::InitPatch()
     }
 }
 
+bool AuthSocket::VerifyVersion(uint8 const* a, int32 aLength, uint8 const* versionProof, bool isReconnect)
+{
+    if (!sConfig.GetBoolDefault("StrictVersionCheck", false))
+    {
+        return true;
+    }
+
+    std::array<uint8, 20> zeros = { { } };
+    std::array<uint8, 20> const* versionHash = nullptr;
+
+    if (!isReconnect)
+    {
+        RealmBuildInfo const* buildInfo = FindBuildInfo(_build);
+        if (!buildInfo)
+        {
+            return false;
+        }
+
+        if (_os == "Win")
+        {
+            versionHash = &buildInfo->WindowsHash;
+        }
+        else if (_os == "OSX")
+        {
+            versionHash = &buildInfo->MacHash;
+        }
+
+        if (!versionHash)
+        {
+            return false;
+        }
+
+        if (!memcmp(versionHash->data(), zeros.data(), zeros.size()))
+        {
+            return true;
+        }
+    }
+    else
+    {
+        versionHash = &zeros;
+    }
+
+    Sha1Hash version;
+    version.UpdateData(a, aLength);
+    version.UpdateData(versionHash->data(), versionHash->size());
+    version.Finalize();
+
+    return memcmp(versionProof, version.GetDigest(), version.GetLength()) == 0;
+}
