@@ -713,7 +713,8 @@ bool AuthSocket::_HandleLogonProof()
             if (verify)
             {
                 Field* vf = verify->Fetch();
-                if (strcmp(vf->GetString(), K_hex) == 0)
+                const char *sessionkey = vf->GetString();
+                if (sessionkey && K_hex && strcmp(sessionkey, K_hex) == 0)
                     keyVerified = true;
                 delete verify;
             }
