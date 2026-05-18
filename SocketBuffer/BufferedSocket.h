@@ -55,17 +55,19 @@ class BufferedSocket: public ACE_Svc_Handler<ACE_SOCK_STREAM, ACE_NULL_SYNCH>
          * @brief
          *
          */
-        virtual void OnRead(void) { }
+        virtual void OnRead(void) {}
+
         /**
          * @brief
          *
          */
-        virtual void OnAccept(void) { }
+        virtual void OnAccept(void) {}
+
         /**
          * @brief
          *
          */
-        virtual void OnClose(void) { }
+        virtual void OnClose(void) {}
 
     public:
         /**

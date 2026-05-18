@@ -77,7 +77,6 @@ typedef struct AUTH_LOGON_CHALLENGE_C
     uint8   I[1];
 } sAuthLogonChallenge_C;
 
-
 typedef struct AUTH_LOGON_PROOF_C
 {
     uint8   cmd;
@@ -139,7 +138,6 @@ typedef struct AuthHandler
 #else
 #pragma pack(pop)
 #endif
-
 
 /// Constructor - set the N and g values for SRP6
 AuthSocket::AuthSocket() : _status(STATUS_CHALLENGE), _accountSecurityLevel(SEC_PLAYER), _build(0), patch_(ACE_INVALID_HANDLE)
