@@ -154,6 +154,8 @@ class AuthSocket: public BufferedSocket
             STATUS_CLOSED
         };
 
+        bool VerifyVersion(uint8 const* a, int32 aLength, uint8 const* versionProof, bool isReconnect);
+
         BigNumber N, s, g, v; /**< TODO */
         BigNumber b, B; /**< TODO */
         BigNumber K; /**< TODO */
