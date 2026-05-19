@@ -435,7 +435,10 @@ extern int main(int argc, char** argv)
         {
             stopEvent = true;
         }
-        while (m_ServiceStatus == 2) { Sleep(1000); }
+        while (m_ServiceStatus == 2)
+        {
+             Sleep(1000);
+        }
 #endif
     }
 
