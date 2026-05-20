@@ -23,7 +23,7 @@
  */
 
 /** \file
-  \ingroup realmd
+    \ingroup realmd
   */
 
 #ifndef MANGOS_H_BUFFEREDSOCKET
@@ -75,6 +75,7 @@ class BufferedSocket: public ACE_Svc_Handler<ACE_SOCK_STREAM, ACE_NULL_SYNCH>
          *
          */
         BufferedSocket(void);
+
         /**
          * @brief
          *
@@ -87,6 +88,7 @@ class BufferedSocket: public ACE_Svc_Handler<ACE_SOCK_STREAM, ACE_NULL_SYNCH>
          * @return size_t
          */
         size_t recv_len(void) const;
+
         /**
          * @brief
          *
@@ -95,6 +97,7 @@ class BufferedSocket: public ACE_Svc_Handler<ACE_SOCK_STREAM, ACE_NULL_SYNCH>
          * @return bool
          */
         bool recv_soft(char* buf, size_t len);
+
         /**
          * @brief
          *
@@ -103,6 +106,7 @@ class BufferedSocket: public ACE_Svc_Handler<ACE_SOCK_STREAM, ACE_NULL_SYNCH>
          * @return bool
          */
         bool recv(char* buf, size_t len);
+
         /**
          * @brief
          *

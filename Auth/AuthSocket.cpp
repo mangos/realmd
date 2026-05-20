@@ -375,8 +375,8 @@ bool AuthSocket::_HandleLogonChallenge()
     std::string address = get_remote_address();
     LoginDatabase.escape_string(address);
     QueryResult* result = LoginDatabase.PQuery("SELECT `unbandate` FROM `ip_banned` WHERE "
-                          //    permanent                    still banned
-                          "(`unbandate` = `bandate` OR `unbandate` > UNIX_TIMESTAMP()) AND `ip` = '%s'", address.c_str());
+                            //               permanent                 still banned
+                            "(`unbandate` = `bandate` OR `unbandate` > UNIX_TIMESTAMP()) AND `ip` = '%s'", address.c_str());
     if (result)
     {
         pkt << (uint8)WOW_FAIL_BANNED;
