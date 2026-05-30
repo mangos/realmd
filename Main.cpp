@@ -69,6 +69,7 @@
 
 #ifdef WIN32
 #include "ServiceWin32.h"
+#include "WheatyExceptionReport.h"
 char serviceName[] = "realmd";
 char serviceLongName[] = "MaNGOS realmd service";
 char serviceDescription[] = "Massive Network Game Object Server";
@@ -154,6 +155,11 @@ void usage(const char* prog)
  */
 extern int main(int argc, char** argv)
 {
+#ifdef _WIN32
+    static WheatyExceptionReport exceptionReport;
+    SetUnhandledExceptionFilter(WheatyExceptionReport::WheatyUnhandledExceptionFilter);
+#endif
+
     ///- Command line parsing
     char const* cfg_file = REALMD_CONFIG_LOCATION;
 
