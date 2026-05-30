@@ -87,6 +87,24 @@ bool StartDB();
 void UnhookSignals();
 void HookSignals();
 
+#ifdef _WIN32
+#include <windows.h>
+#include <string>
+/// Update the console title with current auth/waiting and connection counts, only if changed.
+static void UpdateConsoleTitle(uint32 authWaiting, uint32 connections)
+{
+    static std::string s_lastTitle;
+    char title[128];
+    snprintf(title, sizeof(title), "MaNGOS Realm-Daemon (%u Auth/Waiting - %u Connections)", authWaiting, connections);
+    std::string newTitle(title);
+    if (s_lastTitle != newTitle)
+    {
+        s_lastTitle = newTitle;
+        SetConsoleTitleA(title);
+    }
+}
+#endif
+
 bool stopEvent = false;                                     ///< Setting it to true stops the server
 
 DatabaseType LoginDatabase;                                 ///< Accessor to the realm server database
@@ -430,6 +448,14 @@ extern int main(int argc, char** argv)
             DETAIL_LOG("Ping MySQL to keep connection alive");
             LoginDatabase.Ping();
         }
+#ifdef _WIN32
+        static uint32 titleUpdateCounter = 0;
+        if ((++titleUpdateCounter) >= 30) // ~3 seconds at 100ms reactor interval
+        {
+            titleUpdateCounter = 0;
+            UpdateConsoleTitle(AuthSocket::GetAuthWaitingCount(), AuthSocket::GetConnectionCount());
+        }
+#endif
 #ifdef WIN32
         if (m_ServiceStatus == 0)
         {
