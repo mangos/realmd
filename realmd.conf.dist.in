@@ -93,6 +93,23 @@ ConfVersion=@MANGOS_REALM_VER@
 #        Default: 20
 #                 0  (Disabled)
 #
+#    ScheduledExit.Enable
+#        Enable scheduled shutdown/restart.
+#        Default: 0
+#
+#    ScheduledExit.DayOfWeek
+#        Day of week for scheduled action.
+#        Convention: 0 = Sunday, 1 = Monday, ... 6 = Saturday.
+#        Default: 3
+#
+#    ScheduledExit.Time
+#        Local server time in HH:MM 24-hour format.
+#        Default: "05:00"
+#
+#    ScheduledExit.Mode
+#        shutdown or restart.
+#        Default: "restart"
+#
 #    WrongPass.MaxCount
 #        Number of login attemps with wrong password before the account or IP is banned
 #        Default: 3  (Never ban)
@@ -126,6 +143,10 @@ UseProcessors          = 0
 ProcessPriority        = 1
 WaitAtStartupError     = 0
 RealmsStateUpdateDelay = 20
+ScheduledExit.Enable    = 0
+ScheduledExit.DayOfWeek = 3
+ScheduledExit.Time      = "05:00"
+ScheduledExit.Mode      = "restart"
 
 WrongPass.MaxCount     = 3
 WrongPass.BanTime      = 300

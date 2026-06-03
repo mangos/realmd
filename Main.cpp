@@ -51,6 +51,7 @@
 #include "Auth/AuthSocket.h"
 #include "SystemConfig.h"
 #include "revision_data.h"
+#include "ScheduledExit.h"
 #include "Util.h"
 
 #include <openssl/opensslv.h>
@@ -107,8 +108,89 @@ static void UpdateConsoleTitle(uint32 authWaiting, uint32 connections)
 #endif
 
 bool stopEvent = false;                                     ///< Setting it to true stops the server
+uint8 exitCode = 0;                                         ///< Process exit code
 
 DatabaseType LoginDatabase;                                 ///< Accessor to the realm server database
+
+namespace
+{
+    uint8 const REALMD_SHUTDOWN_EXIT_CODE = 0;
+    uint8 const REALMD_RESTART_EXIT_CODE = 2;
+
+    MaNGOS::ScheduledExitSchedule s_scheduledExit;
+    MaNGOS::ScheduledExitState s_scheduledExitState;
+
+    void LoadScheduledExitConfig()
+    {
+        s_scheduledExit = MaNGOS::ScheduledExitSchedule();
+        s_scheduledExitState = MaNGOS::ScheduledExitState();
+
+        if (!sConfig.GetBoolDefault("ScheduledExit.Enable", false))
+        {
+            sLog.outString("ScheduledExit: disabled");
+            return;
+        }
+
+        std::string dayText = sConfig.GetStringDefault("ScheduledExit.DayOfWeek", "3");
+        uint32 dayOfWeek = 0;
+        if (!MaNGOS::ParseScheduledExitUInt32(dayText, dayOfWeek) || dayOfWeek > 6)
+        {
+            sLog.outError("ScheduledExit: invalid ScheduledExit.DayOfWeek '%s'; disabling scheduled exit", dayText.c_str());
+            return;
+        }
+
+        std::string timeText = sConfig.GetStringDefault("ScheduledExit.Time", "05:00");
+        uint32 hour = 0;
+        uint32 minute = 0;
+        if (!MaNGOS::ParseScheduledExitTime(timeText, hour, minute))
+        {
+            sLog.outError("ScheduledExit: invalid ScheduledExit.Time '%s'; disabling scheduled exit", timeText.c_str());
+            return;
+        }
+
+        std::string modeText = sConfig.GetStringDefault("ScheduledExit.Mode", "restart");
+        MaNGOS::ScheduledExitMode mode = MaNGOS::SCHEDULED_EXIT_MODE_RESTART;
+        if (!MaNGOS::ParseScheduledExitMode(modeText, mode))
+        {
+            sLog.outError("ScheduledExit: invalid ScheduledExit.Mode '%s'; disabling scheduled exit", modeText.c_str());
+            return;
+        }
+
+        s_scheduledExit.enabled = true;
+        s_scheduledExit.dayOfWeek = dayOfWeek;
+        s_scheduledExit.hour = hour;
+        s_scheduledExit.minute = minute;
+        s_scheduledExit.mode = mode;
+
+        if (MaNGOS::MarkScheduledExitHandledIfMatching(s_scheduledExit, safe_localtime(time(NULL)), s_scheduledExitState))
+        {
+            sLog.outString("ScheduledExit: startup minute matches configured schedule; suppressing this minute to avoid restart loop");
+        }
+
+        sLog.outString("ScheduledExit: enabled day=%u time=%02u:%02u mode=%s",
+            s_scheduledExit.dayOfWeek, s_scheduledExit.hour, s_scheduledExit.minute,
+            MaNGOS::ScheduledExitModeToString(s_scheduledExit.mode));
+    }
+
+    void CheckScheduledExit()
+    {
+        if (!s_scheduledExit.enabled || stopEvent)
+        {
+            return;
+        }
+
+        std::tm localTime = safe_localtime(time(NULL));
+        if (!MaNGOS::CheckAndMarkScheduledExit(s_scheduledExit, localTime, s_scheduledExitState))
+        {
+            return;
+        }
+
+        exitCode = s_scheduledExit.mode == MaNGOS::SCHEDULED_EXIT_MODE_RESTART ? REALMD_RESTART_EXIT_CODE : REALMD_SHUTDOWN_EXIT_CODE;
+        sLog.outString("ScheduledExit: firing scheduled %s",
+            MaNGOS::ScheduledExitModeToString(s_scheduledExit.mode));
+        stopEvent = true;
+    }
+}
 
 /**
  * @brief Print command line usage information
@@ -291,6 +373,8 @@ extern int main(int argc, char** argv)
         Log::WaitBeforeContinueIfNeed();
     }
 
+    LoadScheduledExitConfig();
+
     DETAIL_LOG("Using SSL version: %s (Library: %s)", OPENSSL_VERSION_TEXT, SSLeay_version(SSLEAY_VERSION));
 
 #if defined(OPENSSL_VERSION_MAJOR) && (OPENSSL_VERSION_MAJOR >= 3)
@@ -454,6 +538,8 @@ extern int main(int argc, char** argv)
             DETAIL_LOG("Ping MySQL to keep connection alive");
             LoginDatabase.Ping();
         }
+
+        CheckScheduledExit();
 #ifdef _WIN32
         static uint32 titleUpdateCounter = 0;
         if ((++titleUpdateCounter) >= 30) // ~3 seconds at 100ms reactor interval
@@ -481,7 +567,7 @@ extern int main(int argc, char** argv)
     UnhookSignals();
 
     sLog.outString("Halting process...");
-    return 0;
+    return exitCode;
 }
 
 /// Handle termination signals
