@@ -135,7 +135,8 @@ namespace
         uint32 dayOfWeek = 0;
         if (!MaNGOS::ParseScheduledExitUInt32(dayText, dayOfWeek) || dayOfWeek > 6)
         {
-            sLog.outError("ScheduledExit: invalid ScheduledExit.DayOfWeek '%s'; disabling scheduled exit", dayText.c_str());
+            sLog.outError("ScheduledExit: invalid ScheduledExit.DayOfWeek '%s'; "
+                "disabling scheduled exit", dayText.c_str());
             return;
         }
 
@@ -144,7 +145,8 @@ namespace
         uint32 minute = 0;
         if (!MaNGOS::ParseScheduledExitTime(timeText, hour, minute))
         {
-            sLog.outError("ScheduledExit: invalid ScheduledExit.Time '%s'; disabling scheduled exit", timeText.c_str());
+            sLog.outError("ScheduledExit: invalid ScheduledExit.Time '%s'; "
+                "disabling scheduled exit", timeText.c_str());
             return;
         }
 
@@ -152,7 +154,8 @@ namespace
         MaNGOS::ScheduledExitMode mode = MaNGOS::SCHEDULED_EXIT_MODE_RESTART;
         if (!MaNGOS::ParseScheduledExitMode(modeText, mode))
         {
-            sLog.outError("ScheduledExit: invalid ScheduledExit.Mode '%s'; disabling scheduled exit", modeText.c_str());
+            sLog.outError("ScheduledExit: invalid ScheduledExit.Mode '%s'; "
+                "disabling scheduled exit", modeText.c_str());
             return;
         }
 
@@ -162,9 +165,11 @@ namespace
         s_scheduledExit.minute = minute;
         s_scheduledExit.mode = mode;
 
-        if (MaNGOS::MarkScheduledExitHandledIfMatching(s_scheduledExit, safe_localtime(time(NULL)), s_scheduledExitState))
+        if (MaNGOS::MarkScheduledExitHandledIfMatching(
+            s_scheduledExit, safe_localtime(time(NULL)), s_scheduledExitState))
         {
-            sLog.outString("ScheduledExit: startup minute matches configured schedule; suppressing this minute to avoid restart loop");
+            sLog.outString("ScheduledExit: startup minute matches configured "
+                "schedule; suppressing this minute to avoid restart loop");
         }
 
         sLog.outString("ScheduledExit: enabled day=%u time=%02u:%02u mode=%s",
@@ -185,7 +190,8 @@ namespace
             return;
         }
 
-        exitCode = s_scheduledExit.mode == MaNGOS::SCHEDULED_EXIT_MODE_RESTART ? REALMD_RESTART_EXIT_CODE : REALMD_SHUTDOWN_EXIT_CODE;
+        exitCode = s_scheduledExit.mode == MaNGOS::SCHEDULED_EXIT_MODE_RESTART
+            ? REALMD_RESTART_EXIT_CODE : REALMD_SHUTDOWN_EXIT_CODE;
         sLog.outString("ScheduledExit: firing scheduled %s",
             MaNGOS::ScheduledExitModeToString(s_scheduledExit.mode));
         stopEvent = true;
