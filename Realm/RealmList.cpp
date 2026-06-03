@@ -23,8 +23,8 @@
  */
 
 /** \file
-    \ingroup realmd
-*/
+ \ingroup realmd
+ */
 
 #include "Common.h"
 #include "RealmList.h"
@@ -69,10 +69,12 @@ RealmBuildInfo const* FindBuildInfo(uint16 _build)
 
     // continue from 1 with explicit equal check
     for (int i = 1; ExpectedRealmdClientBuilds[i].build; ++i)
+    {
         if (_build == ExpectedRealmdClientBuilds[i].build)
         {
             return &ExpectedRealmdClientBuilds[i];
         }
+    }
 
     // none appropriate build
     return NULL;
@@ -196,7 +198,7 @@ void RealmList::UpdateRealm(uint32 ID, const std::string& name, ACE_INET_Addr co
     else
     {
         sLog.outError("You don't seem to have added any allowed realmbuilds to the realm: %s"
-                      " and therefore it will not be listed to anyone", name.c_str());
+            " and therefore it will not be listed to anyone", name.c_str());
     }
     realm.realmBuildInfo.build = first_build;
     realm.realmBuildInfo.major_version = 0;
@@ -205,11 +207,15 @@ void RealmList::UpdateRealm(uint32 ID, const std::string& name, ACE_INET_Addr co
     realm.realmBuildInfo.hotfix_version = ' ';
 
     if (first_build)
+    {
         if (RealmBuildInfo const* bInfo = FindBuildInfo(first_build))
+        {
             if (bInfo->build == first_build)
             {
                 realm.realmBuildInfo = *bInfo;
             }
+        }
+    }
 
     ///- Append port to IP address.
     realm.ExternalAddress = address;

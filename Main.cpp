@@ -74,7 +74,7 @@
 char serviceName[] = "realmd";
 char serviceLongName[] = "MaNGOS realmd service";
 char serviceDescription[] = "Massive Network Game Object Server";
-/*
+/**
  * -1 - not in service mode
  *  0 - stopped
  *  1 - running
@@ -92,7 +92,7 @@ void HookSignals();
 #ifdef _WIN32
 #include <windows.h>
 #include <string>
-/// Update the console title with current auth/waiting and connection counts, only if changed.
+/** Update the console title with current auth/waiting and connection counts, only if changed. */
 static void UpdateConsoleTitle(uint32 authWaiting, uint32 connections)
 {
     static std::string s_lastTitle;
@@ -208,19 +208,19 @@ namespace
 void usage(const char* prog)
 {
     sLog.outString("Usage: \n %s [<options>]\n"
-                "    -v, --version            print version and exist\n\r"
-                "    -c config_file           use config_file as configuration file\n\r"
+        "    -v, --version            print version and exist\n\r"
+        "    -c config_file           use config_file as configuration file\n\r"
 #ifdef WIN32
-                "    Running as service functions:\n\r"
-                "    -s run                   run as service\n\r"
-                "    -s install               install service\n\r"
-                "    -s uninstall             uninstall service\n\r"
+        "    Running as service functions:\n\r"
+        "    -s run                   run as service\n\r"
+        "    -s install               install service\n\r"
+        "    -s uninstall             uninstall service\n\r"
 #else
-                "    Running as daemon functions:\n\r"
-                "    -s run                   run as daemon\n\r"
-                "    -s stop                  stop daemon\n\r"
+        "    Running as daemon functions:\n\r"
+        "    -s run                   run as daemon\n\r"
+        "    -s stop                  stop daemon\n\r"
 #endif
-                , prog);
+    , prog);
 }
 
 /**

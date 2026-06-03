@@ -23,8 +23,8 @@
  */
 
 /** \file
-    \ingroup realmd
-*/
+ \ingroup realmd
+ */
 
 #ifndef MANGOS_H_AUTHCODES
 #define MANGOS_H_AUTHCODES

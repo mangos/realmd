@@ -23,8 +23,8 @@
  */
 
 /** \file
-    \ingroup realmd
-  */
+ \ingroup realmd
+ */
 
 #include "Common.h"
 #include "BufferedSocket.h"
@@ -37,8 +37,8 @@
 #define MSG_NOSIGNAL 0
 #endif
 
-BufferedSocket::BufferedSocket(void):
-    input_buffer_(4096),
+BufferedSocket::BufferedSocket(void)
+    : input_buffer_(4096),
     remote_address_("<unknown>")
 {
 }

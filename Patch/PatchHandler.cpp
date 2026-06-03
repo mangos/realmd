@@ -23,8 +23,8 @@
  */
 
 /** \file
-    \ingroup realmd
-  */
+ \ingroup realmd
+ */
 
 #include "Common.h"
 #include "PatchHandler.h"
@@ -85,9 +85,9 @@ int PatchHandler::open(void*)
 
     int nodelay = 0;
     if (-1 == peer().set_option(ACE_IPPROTO_TCP,
-                                TCP_NODELAY,
-                                &nodelay,
-                                sizeof(nodelay)))
+        TCP_NODELAY,
+        &nodelay,
+        sizeof(nodelay)))
     {
         return -1;
     }
@@ -95,9 +95,9 @@ int PatchHandler::open(void*)
 #if defined(TCP_CORK)
     int cork = 1;
     if (-1 == peer().set_option(ACE_IPPROTO_TCP,
-                                TCP_CORK,
-                                &cork,
-                                sizeof(cork)))
+        TCP_CORK,
+        &cork,
+        sizeof(cork)))
     {
         return -1;
     }
@@ -126,8 +126,8 @@ int PatchHandler::svc(void)
         data.data_size = (ACE_UINT16)r;
 
         if (peer().send((const char*)&data,
-                        ((size_t) r) + sizeof(data) - sizeof(data.data),
-                        flags) == -1)
+            ((size_t) r) + sizeof(data) - sizeof(data.data),
+            flags) == -1)
         {
             return -1;
         }
@@ -196,12 +196,13 @@ void PatchCache::LoadPatchMD5(const char* szFileName)
 bool PatchCache::GetHash(const char* pat, ACE_UINT8 mymd5[MD5_DIGEST_LENGTH])
 {
     for (Patches::iterator i = patches_.begin(); i != patches_.end(); ++i)
+    {
         if (!stricmp(pat, i->first.c_str()))
         {
             memcpy(mymd5, i->second->md5, MD5_DIGEST_LENGTH);
             return true;
         }
-
+    }
     return false;
 }
 
@@ -232,4 +233,3 @@ void PatchCache::LoadPatchesInfo()
 
     ACE_OS::closedir(dirp);
 }
-

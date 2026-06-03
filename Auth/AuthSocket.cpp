@@ -23,8 +23,8 @@
  */
 
 /** \file
-    \ingroup realmd
-*/
+ \ingroup realmd
+ */
 
 #include "Common.h"
 #include "Database/DatabaseEnv.h"
@@ -36,7 +36,6 @@
 #include "Patch/PatchHandler.h"
 
 #include <openssl/md5.h>
-//#include "Util.h" -- for commented utf8ToUpperOnlyLatin
 
 #include <ace/OS_NS_unistd.h>
 #include <ace/OS_NS_fcntl.h>
@@ -163,7 +162,9 @@ AuthSocket::~AuthSocket()
     }
 #ifdef _WIN32
     if (_status == STATUS_AUTHED)
+    {
         s_authed.fetch_sub(1, std::memory_order_relaxed);
+    }
     s_connections.fetch_sub(1, std::memory_order_relaxed);
 #endif
 }
@@ -388,8 +389,8 @@ bool AuthSocket::_HandleLogonChallenge()
     std::string address = get_remote_address();
     LoginDatabase.escape_string(address);
     QueryResult* result = LoginDatabase.PQuery("SELECT `unbandate` FROM `ip_banned` WHERE "
-                            //               permanent                 still banned
-                            "(`unbandate` = `bandate` OR `unbandate` > UNIX_TIMESTAMP()) AND `ip` = '%s'", address.c_str());
+    //                   permanent                 still banned
+        "(`unbandate` = `bandate` OR `unbandate` > UNIX_TIMESTAMP()) AND `ip` = '%s'", address.c_str());
     if (result)
     {
         pkt << (uint8)WOW_FAIL_BANNED;
@@ -434,7 +435,7 @@ bool AuthSocket::_HandleLogonChallenge()
             {
                 ///- If the account is banned, reject the logon attempt
                 QueryResult* banresult = LoginDatabase.PQuery("SELECT `bandate`,`unbandate` FROM `account_banned` WHERE "
-                                         "`id` = %u AND `active` = 1 AND (`unbandate` > UNIX_TIMESTAMP() OR `unbandate` = `bandate`)", (*result)[1].GetUInt32());
+                    "`id` = %u AND `active` = 1 AND (`unbandate` > UNIX_TIMESTAMP() OR `unbandate` = `bandate`)", (*result)[1].GetUInt32());
                 if (banresult)
                 {
                     if ((*banresult)[0].GetUInt64() == (*banresult)[1].GetUInt64())
@@ -711,7 +712,7 @@ bool AuthSocket::_HandleLogonProof()
         LoginDatabase.Execute("START TRANSACTION");
         char updateQuery[512];
         snprintf(updateQuery, sizeof(updateQuery),
-            "UPDATE `account` SET `sessionkey` = '%s', `last_ip` = '%s', `last_login` = NOW(), `locale` = '%u', `os` = '%s', `failed_logins` = 0 WHERE `username` = '%s'",
+                "UPDATE `account` SET `sessionkey` = '%s', `last_ip` = '%s', `last_login` = NOW(), `locale` = '%u', `os` = '%s', `failed_logins` = 0 WHERE `username` = '%s'",
             K_hex, get_remote_address().c_str(), GetLocaleByName(_localizationName), _os.c_str(), _safelogin.c_str());
         LoginDatabase.Execute(updateQuery);
         LoginDatabase.Execute("COMMIT");
@@ -727,11 +728,15 @@ bool AuthSocket::_HandleLogonProof()
                 Field* vf = verify->Fetch();
                 const char *sessionkey = vf->GetString();
                 if (sessionkey && K_hex && strcmp(sessionkey, K_hex) == 0)
+                {
                     keyVerified = true;
+                }
                 delete verify;
             }
             if (!keyVerified)
+            {
                 ACE_OS::sleep(ACE_Time_Value(0, 10000));
+            }
         }
         // Write of new key should be verified, so allow the client to proceed to mangosd
         OPENSSL_free((void*)K_hex);
@@ -784,18 +789,18 @@ bool AuthSocket::_HandleLogonProof()
                     {
                         uint32 acc_id = fields[0].GetUInt32();
                         LoginDatabase.PExecute("INSERT INTO `account_banned` VALUES ('%u',UNIX_TIMESTAMP(),UNIX_TIMESTAMP()+'%u','MaNGOS realmd','Failed login autoban',1)",
-                                               acc_id, WrongPassBanTime);
+                            acc_id, WrongPassBanTime);
                         BASIC_LOG("[AuthChallenge] account %s got banned for '%u' seconds because it failed to authenticate '%u' times",
-                                  _login.c_str(), WrongPassBanTime, failed_logins);
+                            _login.c_str(), WrongPassBanTime, failed_logins);
                     }
                     else
                     {
                         std::string current_ip = get_remote_address();
                         LoginDatabase.escape_string(current_ip);
                         LoginDatabase.PExecute("INSERT INTO `ip_banned` VALUES ('%s',UNIX_TIMESTAMP(),UNIX_TIMESTAMP()+'%u','MaNGOS realmd','Failed login autoban')",
-                                               current_ip.c_str(), WrongPassBanTime);
+                            current_ip.c_str(), WrongPassBanTime);
                         BASIC_LOG("[AuthChallenge] IP %s got banned for '%u' seconds because account %s failed to authenticate '%u' times",
-                                  current_ip.c_str(), WrongPassBanTime, _login.c_str(), failed_logins);
+                            current_ip.c_str(), WrongPassBanTime, _login.c_str(), failed_logins);
                     }
                 }
                 delete loginfail;
@@ -965,7 +970,7 @@ ACE_INET_Addr const& AuthSocket::GetAddressForClient(Realm const& realm, ACE_INE
     }
 
     // Return external IP
-        return realm.ExternalAddress;
+    return realm.ExternalAddress;
 }
 
 /// %Realm List command handler
