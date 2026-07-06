@@ -33,20 +33,17 @@
 #include "Realm/RealmList.h"
 #include "AuthSocket.h"
 #include "AuthCodes.h"
-#include "Patch/PatchHandler.h"
 
 #include <openssl/md5.h>
 
-#include <ace/OS_NS_unistd.h>
-#include <ace/OS_NS_fcntl.h>
-#include <ace/OS_NS_sys_stat.h>
+#include <chrono>
+#include <cstring>
+#include <thread>
 
 extern DatabaseType LoginDatabase;
 
-#ifdef _WIN32
 std::atomic<uint32> AuthSocket::s_connections{0};
 std::atomic<uint32> AuthSocket::s_authed{0};
-#endif
 
 enum AccountFlags
 {
@@ -120,15 +117,6 @@ typedef struct AUTH_RECONNECT_PROOF_C
     uint8   number_of_keys;
 } sAuthReconnectProof_C;
 
-typedef struct XFER_INIT
-{
-    uint8 cmd;                                              // XFER_INITIATE
-    uint8 fileNameLen;                                      // strlen(fileName);
-    uint8 fileName[5];                                      // fileName[fileNameLen]
-    uint64 file_size;                                       // file size (bytes)
-    uint8 md5[MD5_DIGEST_LENGTH];                           // MD5
-} XFER_INIT;
-
 typedef struct AuthHandler
 {
     eAuthCmd cmd;
@@ -144,60 +132,113 @@ typedef struct AuthHandler
 #endif
 
 /// Constructor - set the N and g values for SRP6
-AuthSocket::AuthSocket() : _status(STATUS_CHALLENGE), _accountSecurityLevel(SEC_PLAYER), _build(0), patch_(ACE_INVALID_HANDLE)
+AuthSocket::AuthSocket() : _status(STATUS_CHALLENGE), _accountSecurityLevel(SEC_PLAYER), _build(0)
 {
     N.SetHexStr("894B645E89E1535BBDAD5B8B290650530801B18EBFBF5E8FAB3C82872A3E9BB7");
     g.SetDword(7);
-#ifdef _WIN32
     s_connections.fetch_add(1, std::memory_order_relaxed);
-#endif
 }
 
-/// Close patch file descriptor before leaving
 AuthSocket::~AuthSocket()
 {
-    if (patch_ != ACE_INVALID_HANDLE)
-    {
-        ACE_OS::close(patch_);
-    }
-#ifdef _WIN32
     if (_status == STATUS_AUTHED)
     {
         s_authed.fetch_sub(1, std::memory_order_relaxed);
     }
     s_connections.fetch_sub(1, std::memory_order_relaxed);
-#endif
 }
 
-/// Accept the connection and set the s random value for SRP6
-void AuthSocket::OnAccept()
+// --- Buffered-stream emulation --------------------------------------------------
+
+bool AuthSocket::recv_soft(char* buf, size_t len)
+{
+    if (recv_len() < len)
+    {
+        return false;
+    }
+    memcpy(buf, m_readBuf.data() + m_readPos, len);
+    return true;
+}
+
+bool AuthSocket::recv(char* buf, size_t len)
+{
+    if (!recv_soft(buf, len))
+    {
+        return false;
+    }
+    recv_skip(len);
+    return true;
+}
+
+void AuthSocket::recv_skip(size_t len)
+{
+    m_readPos += len;
+}
+
+bool AuthSocket::send(const char* buf, size_t len)
+{
+    if (buf == NULL || len == 0)
+    {
+        return true;
+    }
+    if (m_closed.load() || !m_sender)
+    {
+        return false;
+    }
+    const uint8_t* p = reinterpret_cast<const uint8_t*>(buf);
+    m_sender(std::vector<uint8_t>(p, p + len));
+    return true;
+}
+
+void AuthSocket::close_connection()
+{
+    if (!m_closed.exchange(true))
+    {
+        if (m_closer)
+        {
+            m_closer();
+        }
+    }
+}
+
+/// Log the accepted connection (net thread, once, before any client bytes).
+std::vector<uint8_t> AuthSocket::onConnect()
 {
     BASIC_LOG("Accepting connection from '%s'", get_remote_address().c_str());
+    return {};
 }
 
-/// Read the packet from the client
-void AuthSocket::OnRead()
+/// Read the packet(s) from the client
+std::vector<uint8_t> AuthSocket::onData(const uint8_t* data, size_t len)
 {
+    if (m_closed.load())
+    {
+        return {};
+    }
+
+    // Append newly received bytes to the pending buffer, then run the command
+    // loop over it. TCP is a stream, so a handler may find the buffer short and
+    // bail; anything not consumed this pass stays buffered for the next onData().
+    m_readBuf.insert(m_readBuf.end(), data, data + len);
+    m_readPos = 0;
+
     const static AuthHandler table[] =
     {
         { CMD_AUTH_LOGON_CHALLENGE,     STATUS_CHALLENGE,   &AuthSocket::_HandleLogonChallenge    },
         { CMD_AUTH_LOGON_PROOF,         STATUS_LOGON_PROOF, &AuthSocket::_HandleLogonProof        },
         { CMD_AUTH_RECONNECT_CHALLENGE, STATUS_CHALLENGE,   &AuthSocket::_HandleReconnectChallenge},
         { CMD_AUTH_RECONNECT_PROOF,     STATUS_RECON_PROOF, &AuthSocket::_HandleReconnectProof    },
-        { CMD_REALM_LIST,               STATUS_AUTHED,      &AuthSocket::_HandleRealmList         },
-        { CMD_XFER_ACCEPT,              STATUS_PATCH,       &AuthSocket::_HandleXferAccept        },
-        { CMD_XFER_RESUME,              STATUS_PATCH,       &AuthSocket::_HandleXferResume        },
-        { CMD_XFER_CANCEL,              STATUS_PATCH,       &AuthSocket::_HandleXferCancel        }
+        { CMD_REALM_LIST,               STATUS_AUTHED,      &AuthSocket::_HandleRealmList         }
     };
 
     const int AUTH_TOTAL_COMMANDS = sizeof(table)/sizeof(AuthHandler);
     uint8 _cmd;
 
-    while (1)
+    while (!m_closed.load())
     {
         if (!recv_soft((char*)&_cmd, 1))
         {
-            return;
+            break;
         }
 
         size_t i;
@@ -212,25 +253,39 @@ void AuthSocket::OnRead()
             if (table[i].status != _status)
             {
                 DEBUG_LOG("[Auth] Received unauthorized command %u, length %u", (uint32)_cmd, (uint32)recv_len());
-                return;
+                i = AUTH_TOTAL_COMMANDS;    // force loop exit below
+                break;
             }
 
             DEBUG_LOG("[Auth] Received command %u, length %u", (uint32)_cmd, (uint32)recv_len());
             if (!(*this.*table[i].handler)())
             {
                 DEBUG_LOG("[Auth] Command handler failed for cmd %u, length %u", (uint32)_cmd, (uint32)recv_len());
-                return;
+                i = AUTH_TOTAL_COMMANDS;    // force loop exit below
             }
             break;
         }
 
-        ///- Report unknown commands in the debug log
+        ///- Report unknown / unauthorized / failed commands and stop processing
         if (i == AUTH_TOTAL_COMMANDS)
         {
-            DEBUG_LOG("[Auth] Got unknown command %u", (uint32)_cmd);
-            return;
+            DEBUG_LOG("[Auth] Stop processing at command %u", (uint32)_cmd);
+            break;
         }
     }
+
+    // Drop the bytes consumed this pass (mirrors the old crunch()).
+    if (m_readPos >= m_readBuf.size())
+    {
+        m_readBuf.clear();
+    }
+    else if (m_readPos > 0)
+    {
+        m_readBuf.erase(m_readBuf.begin(), m_readBuf.begin() + m_readPos);
+    }
+    m_readPos = 0;
+
+    return {};
 }
 
 /// Make the SRP6 calculation from hash in dB
@@ -557,67 +612,16 @@ bool AuthSocket::_HandleLogonProof()
     ///- Check if the client has one of the expected version numbers
     bool valid_version = FindBuildInfo(_build) != NULL;
 
-    /// <ul><li> If the client has no valid version
+    /// <ul><li> If the client has no valid version, reject it. Server-side patch
+    /// delivery was removed along with ACE, so unsupported builds simply fail.
     if (!valid_version)
     {
-        if (this->patch_ != ACE_INVALID_HANDLE)
-        {
-            return false;
-        }
-
-        ///- Check if we have the apropriate patch on the disk
-        // file looks like: 65535enGB.mpq
-        char tmp[64];
-
-        snprintf(tmp, 24, "./patches/%d%s.mpq", _build, _localizationName.c_str());
-
-        char filename[PATH_MAX];
-        if (ACE_OS::realpath(tmp, filename) != NULL)
-        {
-            patch_ = ACE_OS::open(filename, GENERIC_READ | FILE_FLAG_SEQUENTIAL_SCAN);
-        }
-
-        if (patch_ == ACE_INVALID_HANDLE)
-        {
-            // no patch found
-            ByteBuffer pkt;
-            pkt << (uint8) CMD_AUTH_LOGON_CHALLENGE;
-            pkt << (uint8) 0x00;
-            pkt << (uint8) WOW_FAIL_VERSION_INVALID;
-            DEBUG_LOG("[AuthChallenge] %u is not a valid client version!", _build);
-            DEBUG_LOG("[AuthChallenge] Patch %s not found", tmp);
-            send((char const*)pkt.contents(), pkt.size());
-            return true;
-        }
-
-        XFER_INIT xferh;
-
-        ACE_OFF_T file_size = ACE_OS::filesize(this->patch_);
-
-        if (file_size == -1)
-        {
-            close_connection();
-            return false;
-        }
-
-        if (!PatchCache::instance()->GetHash(tmp, (uint8*)&xferh.md5))
-        {
-            // calculate patch md5, happens if patch was added while realmd was running
-            PatchCache::instance()->LoadPatchMD5(tmp);
-            PatchCache::instance()->GetHash(tmp, (uint8*)&xferh.md5);
-        }
-
-        uint8 data[2] = { CMD_AUTH_LOGON_PROOF, WOW_FAIL_VERSION_UPDATE};
-        send((const char*)data, sizeof(data));
-
-        memcpy(&xferh, "0\x05Patch", 7);
-        xferh.cmd = CMD_XFER_INITIATE;
-        xferh.file_size = file_size;
-
-        send((const char*)&xferh, sizeof(xferh));
-
-        InitPatch();
-
+        ByteBuffer pkt;
+        pkt << (uint8) CMD_AUTH_LOGON_CHALLENGE;
+        pkt << (uint8) 0x00;
+        pkt << (uint8) WOW_FAIL_VERSION_INVALID;
+        DEBUG_LOG("[AuthChallenge] %u is not a valid client version!", _build);
+        send((char const*)pkt.contents(), pkt.size());
         return true;
     }
     /// </ul>
@@ -735,7 +739,7 @@ bool AuthSocket::_HandleLogonProof()
             }
             if (!keyVerified)
             {
-                ACE_OS::sleep(ACE_Time_Value(0, 10000));
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
         }
         // Write of new key should be verified, so allow the client to proceed to mangosd
@@ -750,9 +754,7 @@ bool AuthSocket::_HandleLogonProof()
 
         ///- Set _status to authenticated
         _status = STATUS_AUTHED;
-#ifdef _WIN32
         s_authed.fetch_add(1, std::memory_order_relaxed);
-#endif
     }
     else
     {
@@ -933,9 +935,7 @@ bool AuthSocket::_HandleReconnectProof()
 
         ///- Set _status to authenticated!
         _status = STATUS_AUTHED;
-#ifdef _WIN32
         s_authed.fetch_add(1, std::memory_order_relaxed);
-#endif
 
         return true;
     }
@@ -947,15 +947,20 @@ bool AuthSocket::_HandleReconnectProof()
     }
 }
 
-ACE_INET_Addr const& AuthSocket::GetAddressForClient(Realm const& realm, ACE_INET_Addr const& clientAddr)
+RealmAddress AuthSocket::GetAddressForClient(Realm const& realm, uint32 clientIp)
 {
+    const bool clientLoopback = ((clientIp >> 24) == 127);
+
     // Attempt to send best address for client
-    if (clientAddr.is_loopback())
+    if (clientLoopback)
     {
         // Try guessing if realm is also connected locally
-        if (realm.LocalAddress.is_loopback() || realm.ExternalAddress.is_loopback())
+        if (realm.LocalAddress.loopback || realm.ExternalAddress.loopback)
         {
-            return clientAddr;
+            // Assume the client can reach the realm on the same loopback address.
+            RealmAddress addr = realm.ExternalAddress;
+            addr.ip = clientIp;
+            return addr;
         }
 
         // Assume that user connecting from the machine that authserver is located on
@@ -964,13 +969,25 @@ ACE_INET_Addr const& AuthSocket::GetAddressForClient(Realm const& realm, ACE_INE
     }
 
     // Check if connecting client is in the same network
-    if (IsIPAddrInNetwork(realm.LocalAddress, clientAddr, realm.LocalSubnetMask))
+    if (IsIPAddrInNetwork(realm.LocalAddress.ip, clientIp, realm.LocalSubnetMask.ip))
     {
         return realm.LocalAddress;
     }
 
     // Return external IP
     return realm.ExternalAddress;
+}
+
+/// Parse a dotted-quad IPv4 string (as delivered by the transport) into a
+/// host-byte-order address. Returns 0 if the string is not a valid IPv4.
+static uint32 ParseClientIPv4(const std::string& addr)
+{
+    struct in_addr a;
+    if (inet_pton(AF_INET, addr.c_str(), &a) == 1)
+    {
+        return ntohl(a.s_addr);
+    }
+    return 0;
 }
 
 /// %Realm List command handler
@@ -1020,8 +1037,7 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
     iters = sRealmList.GetIteratorsForBuild(_build);
     uint32 numRealms = sRealmList.NumRealmsForBuild(_build);
 
-    ACE_INET_Addr clientAddr;
-    peer().get_remote_addr(clientAddr);
+    uint32 clientIp = ParseClientIPv4(remote_address_);
 
     switch (_build)
     {
@@ -1034,7 +1050,6 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
 
             for (RealmList::RealmStlList::const_iterator itr = iters.first; itr != iters.second; ++itr)
             {
-                clientAddr.set_port_number((*itr)->ExternalAddress.get_port_number());
                 uint8 AmountOfCharacters;
 
                 // No SQL injection. id of realm is controlled by the database.
@@ -1078,7 +1093,10 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
                 pkt << uint32((*itr)->icon);                                        // realm type
                 pkt << uint8(realmflags);                                           // realmflags
                 pkt << name;                                                        // name
-                pkt << GetAddressString(GetAddressForClient((**itr), clientAddr));  // address
+                {
+                    RealmAddress srvAddr = GetAddressForClient((**itr), clientIp);
+                    pkt << GetAddressString(srvAddr.ip, (*itr)->ExternalAddress.port);  // address
+                }
                 pkt << float((*itr)->populationLevel);
                 pkt << uint8(AmountOfCharacters);
                 pkt << uint8((*itr)->timezone);                                     // realm category
@@ -1106,7 +1124,6 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
 
             for (RealmList::RealmStlList::const_iterator itr = iters.first; itr != iters.second; ++itr)
             {
-                clientAddr.set_port_number((*itr)->ExternalAddress.get_port_number());
                 uint8 AmountOfCharacters;
 
                 // No SQL injection. id of realm is controlled by the database.
@@ -1149,7 +1166,10 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
                 pkt << uint8(lock);                                                 // flags, if 0x01, then realm locked
                 pkt << uint8(realmFlags);                                           // see enum RealmFlags
                 pkt << (*itr)->name;                                                // name
-                pkt << GetAddressString(GetAddressForClient((**itr), clientAddr));  // address
+                {
+                    RealmAddress srvAddr = GetAddressForClient((**itr), clientIp);
+                    pkt << GetAddressString(srvAddr.ip, (*itr)->ExternalAddress.port);  // address
+                }
                 pkt << float((*itr)->populationLevel);
                 pkt << uint8(AmountOfCharacters);
                 pkt << uint8((*itr)->timezone);                                     // realm category (Cfg_Categories.dbc)
@@ -1167,82 +1187,6 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
             pkt << uint16(0x0010);                          // unused value (why 10?)
             break;
         }
-    }
-}
-
-/// Resume patch transfer
-bool AuthSocket::_HandleXferResume()
-{
-    DEBUG_LOG("Entering _HandleXferResume");
-
-    if (recv_len() < 9)
-    {
-        return false;
-    }
-
-    recv_skip(1);
-
-    uint64 start_pos;
-    recv((char*)&start_pos, 8);
-
-    if (patch_ == ACE_INVALID_HANDLE)
-    {
-        close_connection();
-        return false;
-    }
-
-    ACE_OFF_T file_size = ACE_OS::filesize(patch_);
-
-    if (file_size == -1 || start_pos >= (uint64)file_size)
-    {
-        close_connection();
-        return false;
-    }
-
-    if (ACE_OS::lseek(patch_, start_pos, SEEK_SET) == -1)
-    {
-        close_connection();
-        return false;
-    }
-
-    InitPatch();
-
-    return true;
-}
-
-/// Cancel patch transfer
-bool AuthSocket::_HandleXferCancel()
-{
-    DEBUG_LOG("Entering _HandleXferCancel");
-
-    recv_skip(1);
-    close_connection();
-
-    return true;
-}
-
-/// Accept patch transfer
-bool AuthSocket::_HandleXferAccept()
-{
-    DEBUG_LOG("Entering _HandleXferAccept");
-
-    recv_skip(1);
-
-    InitPatch();
-
-    return true;
-}
-
-void AuthSocket::InitPatch()
-{
-    PatchHandler* handler = new PatchHandler(ACE_OS::dup(get_handle()), patch_);
-
-    patch_ = ACE_INVALID_HANDLE;
-
-    if (handler->open() == -1)
-    {
-        handler->close();
-        close_connection();
     }
 }
 

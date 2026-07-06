@@ -26,17 +26,9 @@
 file(GLOB_RECURSE SRC_GRP_AUTH Auth/*.cpp Auth/*.h)
 source_group("Authentication" FILES ${SRC_GRP_AUTH})
 
-#Patch Files
-file(GLOB_RECURSE SRC_GRP_PATCH Patch/*.cpp Patch/*.h)
-source_group("Patch" FILES ${SRC_GRP_PATCH})
-
 #Realm Files
 file(GLOB_RECURSE SRC_GRP_REALM Realm/*.cpp Realm/*.h)
 source_group("Realmlist" FILES ${SRC_GRP_REALM})
-
-#Socket Buffer Files
-file(GLOB_RECURSE SRC_GRP_SOCKB SocketBuffer/*.cpp SocketBuffer/*.h)
-source_group("Socket Buffer" FILES ${SRC_GRP_SOCKB})
 
 
 configure_file(realmd.conf.dist.in ${CMAKE_CURRENT_BINARY_DIR}/realmd.conf.dist)
@@ -50,9 +42,7 @@ endif()
 
 add_executable(realmd
     ${SRC_GRP_AUTH}
-    ${SRC_GRP_PATCH}
     ${SRC_GRP_REALM}
-    ${SRC_GRP_SOCKB}
     Main.cpp
     $<$<BOOL:${WIN32}>:
         ${CMAKE_CURRENT_BINARY_DIR}/VersionInfo.h

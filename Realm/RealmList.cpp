@@ -37,6 +37,45 @@ INSTANTIATE_SINGLETON_1(RealmList);
 
 extern DatabaseType LoginDatabase;
 
+/// Resolve a host string (dotted IPv4 or hostname) to a RealmAddress. Replaces
+/// the DNS resolution that ACE_INET_Addr used to perform in its constructor.
+/// The socket headers (inet_pton/getaddrinfo/ntohl) come in via Common.h.
+static RealmAddress ResolveRealmAddress(const std::string& host, uint16 port)
+{
+    RealmAddress result;
+    result.port = port;
+
+    uint32 hostOrderIp = 0;
+
+    struct in_addr addr;
+    if (inet_pton(AF_INET, host.c_str(), &addr) == 1)
+    {
+        hostOrderIp = ntohl(addr.s_addr);
+    }
+    else
+    {
+        struct addrinfo hints;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+
+        struct addrinfo* res = NULL;
+        if (getaddrinfo(host.c_str(), NULL, &hints, &res) == 0 && res)
+        {
+            hostOrderIp = ntohl(reinterpret_cast<struct sockaddr_in*>(res->ai_addr)->sin_addr.s_addr);
+            freeaddrinfo(res);
+        }
+        else
+        {
+            sLog.outError("Could not resolve realm address '%s'", host.c_str());
+        }
+    }
+
+    result.ip = hostOrderIp;
+    result.loopback = ((hostOrderIp >> 24) == 127);
+    return result;
+}
+
 // will only support WoW 1.12.1/1.12.2/1.12.3, WoW:TBC 2.4.3, WoW:WotLK 3.3.5a and official release for WoW:Cataclysm and later, client builds 15595, 10505, 8606, 6005, 5875
 // if you need more from old build then add it in cases in realmd sources code
 // list sorted from high to low build and first build used as low bound for accepted by default range (any > it will accepted by realmd at least)
@@ -167,7 +206,7 @@ void RealmList::InitBuildToVersion()
     m_buildToVersion[40000] = REALM_VERSION_SHADOWLANDS;
 }
 
-void RealmList::UpdateRealm(uint32 ID, const std::string& name, ACE_INET_Addr const& address, ACE_INET_Addr const& localAddr, ACE_INET_Addr const& localSubmask, uint32 port, uint8 icon, RealmFlags realmflags, uint8 timezone, AccountTypes allowedSecurityLevel, float popu, const std::string& builds)
+void RealmList::UpdateRealm(uint32 ID, const std::string& name, RealmAddress const& address, RealmAddress const& localAddr, RealmAddress const& localSubmask, uint32 port, uint8 icon, RealmFlags realmflags, uint8 timezone, AccountTypes allowedSecurityLevel, float popu, const std::string& builds)
 {
     ///- Create new if not exist or update existed
     Realm& realm = m_realms[name];
@@ -271,9 +310,9 @@ void RealmList::UpdateRealms(bool init)
             float population                = fields[10].GetFloat();
             std::string realmbuilds         = fields[11].GetString();
 
-            ACE_INET_Addr externalAddr(port, externalAddress.c_str(), AF_INET);
-            ACE_INET_Addr localAddr(port, localAddress.c_str(), AF_INET);
-            ACE_INET_Addr submask(0, localSubmask.c_str(), AF_INET);
+            RealmAddress externalAddr = ResolveRealmAddress(externalAddress, port);
+            RealmAddress localAddr = ResolveRealmAddress(localAddress, port);
+            RealmAddress submask = ResolveRealmAddress(localSubmask, 0);
 
             if (realmflags & ~(REALM_FLAG_OFFLINE | REALM_FLAG_NEW_PLAYERS | REALM_FLAG_RECOMMENDED | REALM_FLAG_SPECIFYBUILD))
             {

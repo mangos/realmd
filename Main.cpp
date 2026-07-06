@@ -49,6 +49,7 @@
 #include "GitRevision.h"
 #include "Log.h"
 #include "Auth/AuthSocket.h"
+#include "Auth/AuthServer.h"
 #include "SystemConfig.h"
 #include "revision_data.h"
 #include "ScheduledExit.h"
@@ -61,12 +62,9 @@
 #  include "Auth/OpenSSLProvider.h"
 #endif
 
-#include <ace/Get_Opt.h>
-#include <ace/Dev_Poll_Reactor.h>
-#include <ace/TP_Reactor.h>
-#include <ace/ACE.h>
-#include <ace/Acceptor.h>
-#include <ace/SOCK_Acceptor.h>
+#include <chrono>
+#include <cstring>
+#include <thread>
 
 #ifdef WIN32
 #include "ServiceWin32.h"
@@ -251,28 +249,75 @@ extern int main(int argc, char** argv)
     ///- Command line parsing
     char const* cfg_file = REALMD_CONFIG_LOCATION;
 
-    char const* options = ":c:s:";
-
-    ACE_Get_Opt cmd_opts(argc, argv, options);
-    cmd_opts.long_option("version", 'v');
-
     char serviceDaemonMode = '\0';
 
-    int option;
-    while ((option = cmd_opts()) != EOF)
+    // Minimal command-line parser (replaces ACE_Get_Opt). Recognised options:
+    //   -c <file>            configuration file
+    //   -s <mode>            service/daemon control (run / install / uninstall / stop)
+    //   -v / --version       print version and exit
+    // An option that takes an argument accepts it either attached ("-cFILE") or
+    // as the following token ("-c FILE").
+    auto takeArg = [&](int& i, char const* attached, char opt) -> char const*
     {
-        switch (option)
+        if (attached && *attached)
         {
-            case 'c':
-                cfg_file = cmd_opts.opt_arg();
-                break;
+            return attached;                    // "-cFILE"
+        }
+        if (i + 1 < argc)
+        {
+            return argv[++i];                   // "-c FILE"
+        }
+        sLog.outError("Runtime-Error: -%c option requires an input argument", opt);
+        usage(argv[0]);
+        Log::WaitBeforeContinueIfNeed();
+        return nullptr;
+    };
+
+    for (int i = 1; i < argc; ++i)
+    {
+        char const* arg = argv[i];
+
+        // Long options.
+        if (!strcmp(arg, "--version"))
+        {
+            printf("%s\n", GitRevision::GetProjectRevision());
+            return 0;
+        }
+
+        // Short options: "-x" possibly with an attached value ("-xVALUE").
+        if (arg[0] != '-' || arg[1] == '\0')
+        {
+            sLog.outError("Runtime-Error: bad format of commandline arguments");
+            usage(argv[0]);
+            Log::WaitBeforeContinueIfNeed();
+            return 1;
+        }
+
+        char const opt = arg[1];
+        char const* attached = arg + 2;         // "" when the value is a separate token
+
+        switch (opt)
+        {
             case 'v':
                 printf("%s\n", GitRevision::GetProjectRevision());
                 return 0;
-
+            case 'c':
+            {
+                char const* val = takeArg(i, attached, 'c');
+                if (!val)
+                {
+                    return 1;
+                }
+                cfg_file = val;
+                break;
+            }
             case 's':
             {
-                const char* mode = cmd_opts.opt_arg();
+                char const* mode = takeArg(i, attached, 's');
+                if (!mode)
+                {
+                    return 1;
+                }
 
                 if (!strcmp(mode, "run"))
                 {
@@ -295,18 +340,13 @@ extern int main(int argc, char** argv)
 #endif
                 else
                 {
-                    sLog.outError("Runtime-Error: -%c unsupported argument %s", cmd_opts.opt_opt(), mode);
+                    sLog.outError("Runtime-Error: -%c unsupported argument %s", opt, mode);
                     usage(argv[0]);
                     Log::WaitBeforeContinueIfNeed();
                     return 1;
                 }
                 break;
             }
-            case ':':
-                sLog.outError("Runtime-Error: -%c option requires an input argument", cmd_opts.opt_opt());
-                usage(argv[0]);
-                Log::WaitBeforeContinueIfNeed();
-                return 1;
             default:
                 sLog.outError("Runtime-Error: bad format of commandline arguments");
                 usage(argv[0]);
@@ -400,16 +440,6 @@ extern int main(int argc, char** argv)
     }
 #endif
 
-    DETAIL_LOG("Using ACE: %s", ACE_VERSION);
-
-#if defined (ACE_HAS_EVENT_POLL) || defined (ACE_HAS_DEV_POLL)
-    ACE_Reactor::instance(new ACE_Reactor(new ACE_Dev_Poll_Reactor(ACE::max_handles(), 1), 1), true);
-#else
-    ACE_Reactor::instance(new ACE_Reactor(new ACE_TP_Reactor(), true), true);
-#endif
-
-    sLog.outBasic("Max allowed open files is %d", ACE::max_handles());
-
     /// realmd PID file creation
     std::string pidfile = sConfig.GetStringDefault("PidFile", "");
     if (!pidfile.empty())
@@ -449,16 +479,15 @@ extern int main(int argc, char** argv)
     LoginDatabase.CommitTransaction();
 
     ///- Launch the listening network socket
-    ACE_Acceptor<AuthSocket, ACE_SOCK_Acceptor> acceptor;
-
     uint16 rmport = sConfig.GetIntDefault("RealmServerPort", DEFAULT_REALMSERVER_PORT);
-    std::string bind_ip = sConfig.GetStringDefault("BindIP", "0.0.0.0");
 
-    ACE_INET_Addr bind_addr(rmport, bind_ip.c_str());
+    // NOTE: the shared networking engine binds to all local interfaces; the
+    // legacy BindIP option is no longer honoured (matches the world server).
+    AuthServer authServer;
 
-    if (acceptor.open(bind_addr, ACE_Reactor::instance(), ACE_NONBLOCK) == -1)
+    if (!authServer.Start(rmport))
     {
-        sLog.outError("MaNGOS realmd can not bind to %s:%d", bind_ip.c_str(), rmport);
+        sLog.outError("MaNGOS realmd can not bind to port %d", rmport);
         Log::WaitBeforeContinueIfNeed();
         return 1;
     }
@@ -527,16 +556,11 @@ extern int main(int argc, char** argv)
 #ifndef WIN32
     detachDaemon();
 #endif
-    ///- Wait for termination signal
+    ///- Wait for termination signal. The networking engine runs on its own
+    ///- worker threads; this loop only performs periodic housekeeping.
     while (!stopEvent)
     {
-        // dont move this outside the loop, the reactor will modify it
-        ACE_Time_Value interval(0, 100000);
-
-        if (ACE_Reactor::instance()->run_reactor_event_loop(interval) == -1)
-        {
-            break;
-        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
         if ((++loopCounter) == numLoops)
         {
@@ -565,6 +589,9 @@ extern int main(int argc, char** argv)
         }
 #endif
     }
+
+    ///- Stop accepting connections and join the network worker threads
+    authServer.Stop();
 
     ///- Wait for the delay thread to exit
     LoginDatabase.HaltDelayThread();
