@@ -33,11 +33,14 @@
 #include "Realm/RealmList.h"
 #include "AuthSocket.h"
 #include "AuthCodes.h"
+#include "PatchHandler.h"
 
 #include <openssl/md5.h>
 
 #include <chrono>
 #include <cstring>
+#include <fstream>
+#include <string>
 #include <thread>
 
 extern DatabaseType LoginDatabase;
@@ -116,6 +119,15 @@ typedef struct AUTH_RECONNECT_PROOF_C
     uint8   R3[20];
     uint8   number_of_keys;
 } sAuthReconnectProof_C;
+
+typedef struct XFER_INIT
+{
+    uint8  cmd;                                             // CMD_XFER_INITIATE
+    uint8  fileNameLen;                                     // strlen(fileName)
+    uint8  fileName[5];                                     // "Patch"
+    uint64 file_size;                                       // file size (bytes)
+    uint8  md5[MD5_DIGEST_LENGTH];                          // MD5 of the file
+} XFER_INIT;
 
 typedef struct AuthHandler
 {
@@ -228,7 +240,10 @@ std::vector<uint8_t> AuthSocket::onData(const uint8_t* data, size_t len)
         { CMD_AUTH_LOGON_PROOF,         STATUS_LOGON_PROOF, &AuthSocket::_HandleLogonProof        },
         { CMD_AUTH_RECONNECT_CHALLENGE, STATUS_CHALLENGE,   &AuthSocket::_HandleReconnectChallenge},
         { CMD_AUTH_RECONNECT_PROOF,     STATUS_RECON_PROOF, &AuthSocket::_HandleReconnectProof    },
-        { CMD_REALM_LIST,               STATUS_AUTHED,      &AuthSocket::_HandleRealmList         }
+        { CMD_REALM_LIST,               STATUS_AUTHED,      &AuthSocket::_HandleRealmList         },
+        { CMD_XFER_ACCEPT,              STATUS_PATCH,       &AuthSocket::_HandleXferAccept        },
+        { CMD_XFER_RESUME,              STATUS_PATCH,       &AuthSocket::_HandleXferResume        },
+        { CMD_XFER_CANCEL,              STATUS_PATCH,       &AuthSocket::_HandleXferCancel        }
     };
 
     const int AUTH_TOTAL_COMMANDS = sizeof(table)/sizeof(AuthHandler);
@@ -612,15 +627,51 @@ bool AuthSocket::_HandleLogonProof()
     ///- Check if the client has one of the expected version numbers
     bool valid_version = FindBuildInfo(_build) != NULL;
 
-    /// <ul><li> If the client has no valid version, reject it. Server-side patch
-    /// delivery was removed along with ACE, so unsupported builds simply fail.
+    /// <ul><li> If the client has no valid version, offer a patch archive if one
+    /// matching this build+locale is present under ./patches; otherwise reject it.
     if (!valid_version)
     {
+        // Archive name mirrors the classic downloader: "<build><locale>.mpq"
+        // (e.g. "5875enGB.mpq"). Kept relative to the working directory as before.
+        std::string patchFile = "./patches/" + std::to_string(_build) + _localizationName + ".mpq";
+
+        uint64 fileSize = 0;
+        {
+            std::ifstream patch(patchFile, std::ios::binary | std::ios::ate);
+            if (patch)
+            {
+                fileSize = uint64(patch.tellg());
+            }
+        }
+
+        XFER_INIT xferh;
+        if (fileSize > 0 && PatchCache::instance()->GetMD5(patchFile, xferh.md5))
+        {
+            xferh.cmd         = CMD_XFER_INITIATE;
+            xferh.fileNameLen = 5;
+            memcpy(xferh.fileName, "Patch", 5);
+            xferh.file_size   = fileSize;
+
+            _patchPath = patchFile;
+
+            ///- Tell the client an update is available, then describe the transfer.
+            uint8 data[2] = { CMD_AUTH_LOGON_PROOF, WOW_FAIL_VERSION_UPDATE };
+            send((const char*)data, sizeof(data));
+            send((const char*)&xferh, sizeof(xferh));
+
+            ///- Wait for the client's XFER accept/resume/cancel.
+            _status = STATUS_PATCH;
+            DEBUG_LOG("[AuthChallenge] offering patch %s (%llu bytes) to build %u",
+                      patchFile.c_str(), (unsigned long long)fileSize, _build);
+            return true;
+        }
+
         ByteBuffer pkt;
         pkt << (uint8) CMD_AUTH_LOGON_CHALLENGE;
         pkt << (uint8) 0x00;
         pkt << (uint8) WOW_FAIL_VERSION_INVALID;
         DEBUG_LOG("[AuthChallenge] %u is not a valid client version!", _build);
+        DEBUG_LOG("[AuthChallenge] Patch %s not found", patchFile.c_str());
         send((char const*)pkt.contents(), pkt.size());
         return true;
     }
@@ -1188,5 +1239,61 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
             break;
         }
     }
+}
+
+/// Client accepted the offered patch: stream it from the beginning.
+bool AuthSocket::_HandleXferAccept()
+{
+    DEBUG_LOG("Entering _HandleXferAccept");
+    recv_skip(1);                                           // CMD_XFER_ACCEPT
+    return BeginPatchStream(0);
+}
+
+/// Client wants to resume the patch transfer from a byte offset.
+bool AuthSocket::_HandleXferResume()
+{
+    DEBUG_LOG("Entering _HandleXferResume");
+    if (recv_len() < 9)
+    {
+        return false;
+    }
+    recv_skip(1);                                           // CMD_XFER_RESUME
+
+    uint64 start_pos;
+    recv((char*)&start_pos, 8);
+    EndianConvert(start_pos);
+
+    return BeginPatchStream(start_pos);
+}
+
+/// Client cancelled the patch transfer.
+bool AuthSocket::_HandleXferCancel()
+{
+    DEBUG_LOG("Entering _HandleXferCancel");
+    recv_skip(1);                                           // CMD_XFER_CANCEL
+    close_connection();
+    return true;
+}
+
+bool AuthSocket::BeginPatchStream(uint64 startOffset)
+{
+    if (_patchPath.empty())
+    {
+        close_connection();
+        return false;
+    }
+
+    // Only one transfer per socket: ignore any further XFER commands once the
+    // stream is under way (the background thread now owns the send channel).
+    _status = STATUS_CLOSED;
+
+    if (!StartPatchTransfer(m_sender, m_closer, m_flowControl, _patchPath, startOffset))
+    {
+        sLog.outError("[Patch] failed to open %s for transfer", _patchPath.c_str());
+        close_connection();
+        return false;
+    }
+
+    return true;
 }
 

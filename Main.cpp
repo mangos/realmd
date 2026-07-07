@@ -481,11 +481,12 @@ extern int main(int argc, char** argv)
     ///- Launch the listening network socket
     uint16 rmport = sConfig.GetIntDefault("RealmServerPort", DEFAULT_REALMSERVER_PORT);
 
-    // NOTE: the shared networking engine binds to all local interfaces; the
-    // legacy BindIP option is no longer honoured (matches the world server).
+    // Honour the configured BindIP: empty or "0.0.0.0" listens on every local
+    // interface, otherwise realmd binds only that IPv4/hostname.
+    std::string bindIp = sConfig.GetStringDefault("BindIP", "0.0.0.0");
     AuthServer authServer;
 
-    if (!authServer.Start(rmport))
+    if (!authServer.Start(rmport, bindIp))
     {
         sLog.outError("MaNGOS realmd can not bind to port %d", rmport);
         Log::WaitBeforeContinueIfNeed();

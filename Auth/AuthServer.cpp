@@ -50,12 +50,12 @@ AuthServer::~AuthServer()
     Stop();
 }
 
-bool AuthServer::Start(uint16_t port)
+bool AuthServer::Start(uint16_t port, const std::string& bindIp)
 {
     return m_impl->server.start(port, []() -> std::shared_ptr<net::ISession>
     {
         return std::make_shared<AuthSocket>();
-    });
+    }, bindIp);
 }
 
 void AuthServer::Stop()

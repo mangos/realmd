@@ -74,6 +74,7 @@ class AuthSocket: public net::ISession
         void setPeerAddress(const std::string& addr) override { remote_address_ = addr; }
         void setSender(net::Sender sender) override { m_sender = std::move(sender); }
         void setCloser(net::Closer closer) override { m_closer = std::move(closer); }
+        void setFlowControl(std::shared_ptr<net::FlowControl> fc) override { m_flowControl = std::move(fc); }
         std::vector<uint8_t> onConnect() override;
         std::vector<uint8_t> onData(const uint8_t* data, size_t len) override;
         void onClose() override { m_closed.store(true); }
@@ -132,6 +133,24 @@ class AuthSocket: public net::ISession
         bool _HandleRealmList();
 
         /**
+         * @brief Client accepted the offered patch transfer (from the start).
+         * @return bool
+         */
+        bool _HandleXferAccept();
+
+        /**
+         * @brief Client wants to resume the patch transfer from an offset.
+         * @return bool
+         */
+        bool _HandleXferResume();
+
+        /**
+         * @brief Client cancelled the patch transfer.
+         * @return bool
+         */
+        bool _HandleXferCancel();
+
+        /**
          * @brief
          *
          * @param rI
@@ -150,9 +169,14 @@ class AuthSocket: public net::ISession
             STATUS_CHALLENGE,
             STATUS_LOGON_PROOF,
             STATUS_RECON_PROOF,
+            STATUS_PATCH,       ///< awaiting the client's XFER accept/resume/cancel
             STATUS_AUTHED,
             STATUS_CLOSED
         };
+
+        /// Kick off the background patch stream for the offered archive, honouring
+        /// an XFER_RESUME start offset. Closes the connection on failure.
+        bool BeginPatchStream(uint64 startOffset);
 
         // --- Buffered-stream emulation (formerly provided by BufferedSocket) ----
         // net::ISession delivers raw bytes via onData(); these mirror the old
@@ -172,6 +196,7 @@ class AuthSocket: public net::ISession
 
         net::Sender          m_sender;       ///< thread-safe outbound channel
         net::Closer          m_closer;       ///< request-teardown channel
+        std::shared_ptr<net::FlowControl> m_flowControl; ///< outbound backpressure (patch stream)
         std::atomic<bool>    m_closed{false};
 
         std::string remote_address_ = "<unknown>";
@@ -186,8 +211,9 @@ class AuthSocket: public net::ISession
         std::string _login; /**< TODO */
         std::string _safelogin; /**< TODO */
 
-        std::string _localizationName; /**< Since GetLocaleByName() is _NOT_ bijective, we have to store the locale as a string. Otherwise we can't differ between enUS and enGB */
+        std::string _localizationName; /**< Since GetLocaleByName() is _NOT_ bijective, we have to store the locale as a string. Otherwise we can't differ between enUS and enGB, which is important for the patch system */
         std::string _os;
+        std::string _patchPath; /**< resolved ./patches archive offered to an unsupported build, empty if none */
         uint16 _build; /**< TODO */
         AccountTypes _accountSecurityLevel; /**< TODO */
 

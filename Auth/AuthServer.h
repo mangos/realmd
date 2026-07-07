@@ -31,6 +31,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 
 /**
  * @brief Listening acceptor for realmd auth connections.
@@ -47,9 +48,11 @@ class AuthServer
         AuthServer();
         ~AuthServer();
 
-        /// Start accepting auth connections on the given port.
+        /// Start accepting auth connections on the given port. `bindIp` is the
+        /// configured BindIP: empty (or "0.0.0.0") listens on every local
+        /// interface, otherwise the listener binds that single IPv4/hostname.
         /// @return true on success, false if the port could not be bound.
-        bool Start(uint16_t port);
+        bool Start(uint16_t port, const std::string& bindIp = std::string());
 
         /// Stop the network engine and join its worker threads.
         void Stop();
