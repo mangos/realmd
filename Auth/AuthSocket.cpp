@@ -197,8 +197,9 @@ bool AuthSocket::send(const char* buf, size_t len)
     {
         return false;
     }
-    const uint8_t* p = reinterpret_cast<const uint8_t*>(buf);
-    m_sender(std::vector<uint8_t>(p, p + len));
+    // The transport copies these bytes into the connection's outbound buffer, so they
+    // need only survive the call — no vector, and no allocation, per send.
+    m_sender(reinterpret_cast<const uint8_t*>(buf), len);
     return true;
 }
 
