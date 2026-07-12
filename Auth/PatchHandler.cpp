@@ -40,14 +40,15 @@
 namespace
 {
     /// Bytes carried per CMD_XFER_DATA packet. 4 KiB matches the historical page
-    /// size the classic downloader used and keeps each queued vector small.
+    /// size the classic downloader used.
     constexpr size_t kChunkSize = 4096;
 
-    /// Backpressure ceiling: the streaming thread will not get more than this many
-    /// chunks ahead of what the transport has actually sent, so queued memory is
-    /// bounded at ~kMaxOutstanding * kChunkSize (~256 KiB) regardless of archive
-    /// size or client speed.
-    constexpr uint32_t kMaxOutstanding = 64;
+    /// Backpressure ceiling: the streaming thread will not get further than this many
+    /// bytes ahead of what the transport has actually written to the socket, so queued
+    /// memory stays bounded regardless of archive size or client speed. Stated in
+    /// bytes because the transport coalesces queued packets into one contiguous
+    /// stream, which makes a count of outstanding buffers meaningless.
+    constexpr uint64_t kMaxOutstandingBytes = 256 * 1024;
 }
 
 PatchCache* PatchCache::instance()
@@ -137,17 +138,21 @@ bool StartPatchTransfer(net::Sender sender, net::Closer closer,
         // the transfer; a short initial pause mirrors the old PatchHandler.
         std::this_thread::sleep_for(std::chrono::seconds(1));
 
-        char buf[kChunkSize];
+        // One framing buffer for the whole transfer: the header is rewritten in place
+        // each pass and the payload read straight in behind it, so streaming a 100 MB
+        // archive allocates exactly once rather than once per 4 KiB chunk.
+        std::vector<uint8_t> pkt(3 + kChunkSize);
+
         for (;;)
         {
             // Block until the transport has drained the outbound backlog below the
             // ceiling (real backpressure), or bail out if the connection is gone.
-            if (flow && !flow->awaitWritable(kMaxOutstanding))
+            if (flow && !flow->awaitWritable(kMaxOutstandingBytes))
             {
                 return;
             }
 
-            in->read(buf, sizeof(buf));
+            in->read(reinterpret_cast<char*>(pkt.data() + 3), kChunkSize);
             std::streamsize got = in->gcount();
             if (got <= 0)
             {
@@ -155,13 +160,10 @@ bool StartPatchTransfer(net::Sender sender, net::Closer closer,
             }
 
             // Frame: CMD_XFER_DATA, uint16 size (little-endian), payload.
-            std::vector<uint8_t> pkt;
-            pkt.reserve(3 + static_cast<size_t>(got));
-            pkt.push_back(uint8_t(CMD_XFER_DATA));
-            pkt.push_back(uint8_t(got & 0xFF));
-            pkt.push_back(uint8_t((got >> 8) & 0xFF));
-            pkt.insert(pkt.end(), buf, buf + got);
-            sender(std::move(pkt));
+            pkt[0] = uint8_t(CMD_XFER_DATA);
+            pkt[1] = uint8_t(got & 0xFF);
+            pkt[2] = uint8_t((got >> 8) & 0xFF);
+            sender(pkt.data(), 3 + static_cast<size_t>(got));
         }
 
         if (in->bad())

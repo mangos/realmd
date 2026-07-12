@@ -33,7 +33,6 @@
 #include "Policies/Singleton.h"
 #include "Database/DatabaseEnv.h"
 
-INSTANTIATE_SINGLETON_1(RealmList);
 
 extern DatabaseType LoginDatabase;
 
