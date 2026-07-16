@@ -49,9 +49,8 @@ struct RealmAddress;
  * @brief Handle login commands.
  *
  * A request/response session: the SRP6 login handshake and realm-list handler
- * run inline on the network thread. Ported from the former ACE_Svc_Handler
- * (BufferedSocket) onto the shared net::ISession transport, which owns the
- * socket and hands the session a thread-safe Sender/Closer.
+ * run inline on the network thread, on the shared net::ISession transport, which
+ * owns the socket and hands the session a thread-safe Sender/Closer.
  */
 class AuthSocket: public net::ISession
 {

@@ -30,6 +30,8 @@
 #include "AuthCodes.h"
 #include "Log.h"
 
+#include <openssl/evp.h>
+
 #include <chrono>
 #include <cstring>
 #include <fstream>
@@ -65,28 +67,43 @@ bool PatchCache::ComputeMD5(const std::string& fullPath, uint8_t outMd5[MD5_DIGE
         return false;
     }
 
-    MD5_CTX ctx;
-    MD5_Init(&ctx);
+    // Streamed, so a large patch is never held in memory: the one-shot EVP_Digest()
+    // cannot express that, hence the explicit context.
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    if (!ctx)
+    {
+        return false;
+    }
+
+    if (EVP_DigestInit_ex(ctx, EVP_md5(), NULL) != 1)
+    {
+        EVP_MD_CTX_free(ctx);
+        return false;
+    }
 
     char buf[kChunkSize];
     while (in)
     {
         in.read(buf, sizeof(buf));
         std::streamsize got = in.gcount();
-        if (got > 0)
+        if (got > 0 && EVP_DigestUpdate(ctx, buf, static_cast<size_t>(got)) != 1)
         {
-            MD5_Update(&ctx, buf, static_cast<size_t>(got));
+            EVP_MD_CTX_free(ctx);
+            return false;
         }
     }
 
     // A read error (as opposed to a clean EOF) leaves a partial hash — reject it.
     if (in.bad())
     {
+        EVP_MD_CTX_free(ctx);
         return false;
     }
 
-    MD5_Final(outMd5, &ctx);
-    return true;
+    unsigned int len = 0;
+    const bool ok = EVP_DigestFinal_ex(ctx, outMd5, &len) == 1;
+    EVP_MD_CTX_free(ctx);
+    return ok;
 }
 
 bool PatchCache::GetMD5(const std::string& fullPath, uint8_t outMd5[MD5_DIGEST_LENGTH])

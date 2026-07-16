@@ -34,9 +34,9 @@
 /**
  * @brief Resolved IPv4 endpoint for a realm.
  *
- * Replaces the former ACE_INET_Addr storage: a plain, pre-resolved IPv4 address
- * in host byte order plus a port. @c loopback is precomputed (127.0.0.0/8) so
- * the address-selection logic never needs to re-inspect the octets.
+ * A plain, pre-resolved IPv4 address in host byte order plus a port. @c loopback
+ * is precomputed (127.0.0.0/8) so the address-selection logic never needs to
+ * re-inspect the octets.
  */
 struct RealmAddress
 {
