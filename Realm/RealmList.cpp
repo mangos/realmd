@@ -36,8 +36,7 @@
 
 extern DatabaseType LoginDatabase;
 
-/// Resolve a host string (dotted IPv4 or hostname) to a RealmAddress. Replaces
-/// the DNS resolution that ACE_INET_Addr used to perform in its constructor.
+/// Resolve a host string (dotted IPv4 or hostname) to a RealmAddress.
 /// The socket headers (inet_pton/getaddrinfo/ntohl) come in via Common.h.
 static RealmAddress ResolveRealmAddress(const std::string& host, uint16 port)
 {

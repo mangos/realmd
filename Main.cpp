@@ -57,10 +57,8 @@
 
 #include <openssl/opensslv.h>
 #include <openssl/crypto.h>
-#if defined(OPENSSL_VERSION_MAJOR) && (OPENSSL_VERSION_MAJOR >= 3)
-#  include <openssl/provider.h>
-#  include "Auth/OpenSSLProvider.h"
-#endif
+#include <openssl/provider.h>
+#include "Auth/OpenSSLProvider.h"
 
 #include <chrono>
 #include <cstring>
@@ -251,7 +249,7 @@ extern int main(int argc, char** argv)
 
     char serviceDaemonMode = '\0';
 
-    // Minimal command-line parser (replaces ACE_Get_Opt). Recognised options:
+    // Minimal command-line parser. Recognised options:
     //   -c <file>            configuration file
     //   -s <mode>            service/daemon control (run / install / uninstall / stop)
     //   -v / --version       print version and exit
@@ -421,24 +419,15 @@ extern int main(int argc, char** argv)
 
     LoadScheduledExitConfig();
 
-    DETAIL_LOG("Using SSL version: %s (Library: %s)", OPENSSL_VERSION_TEXT, SSLeay_version(SSLEAY_VERSION));
+    DETAIL_LOG("Using SSL version: %s (Library: %s)", OPENSSL_VERSION_TEXT, OpenSSL_version(OPENSSL_VERSION));
 
-#if defined(OPENSSL_VERSION_MAJOR) && (OPENSSL_VERSION_MAJOR >= 3)
     // RAII provider management - automatically handles cleanup
     OpenSSLProviderManager providerManager;
-
     if (!providerManager.IsInitialized())
     {
         Log::WaitBeforeContinueIfNeed();
         return 0;
     }
-#else
-    if (SSLeay() < 0x10100000L || SSLeay() > 0x10200000L)
-    {
-        DETAIL_LOG("WARNING: OpenSSL version may be out of date or unsupported. Logins to server may not work!");
-        DETAIL_LOG("WARNING: Minimal required version [OpenSSL 1.1.x] and Maximum supported version [OpenSSL 1.2]");
-    }
-#endif
 
     /// realmd PID file creation
     std::string pidfile = sConfig.GetStringDefault("PidFile", "");
