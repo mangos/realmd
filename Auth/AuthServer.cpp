@@ -26,6 +26,8 @@
  \ingroup realmd
  */
 
+#include <cstdint>
+#include <string>
 #include "AuthServer.h"
 #include "AuthSocket.h"
 

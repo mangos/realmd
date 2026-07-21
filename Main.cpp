@@ -41,7 +41,11 @@
  * @{
  */
 
-#include "Common.h"
+#include <csignal>
+#include "Platform/Define.h"
+#include "Common/TimeConstants.h"
+#include <cstdio>
+#include <cstdlib>
 #include "Database/DatabaseEnv.h"
 #include "Realm/RealmList.h"
 
@@ -51,7 +55,6 @@
 #include "Auth/AuthSocket.h"
 #include "Auth/AuthServer.h"
 #include "SystemConfig.h"
-#include "revision_data.h"
 #include "ScheduledExit.h"
 #include "Util.h"
 

@@ -29,7 +29,14 @@
 #ifndef MANGOS_H_REALMLIST
 #define MANGOS_H_REALMLIST
 
-#include "Common.h"
+#include <utility>
+#include "Common/ServerDefines.h"
+#include "Platform/Define.h"
+#include <ctime>
+#include <string>
+#include <map>
+#include <set>
+#include <list>
 
 /**
  * @brief Resolved IPv4 endpoint for a realm.

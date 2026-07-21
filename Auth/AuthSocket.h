@@ -29,7 +29,10 @@
 #ifndef MANGOS_H_AUTHSOCKET
 #define MANGOS_H_AUTHSOCKET
 
-#include "Common.h"
+#include <utility>
+#include "Common/ServerDefines.h"
+#include "Platform/Define.h"
+#include <memory>
 #include "Auth/BigNumber.h"
 #include "Auth/Sha1.h"
 #include "ByteBuffer.h"

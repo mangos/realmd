@@ -29,6 +29,7 @@
 #ifndef MANGOS_H_PATCHHANDLER
 #define MANGOS_H_PATCHHANDLER
 
+#include <memory>
 #include "net/ISession.hpp"
 
 #include <array>

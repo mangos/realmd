@@ -26,6 +26,10 @@
  \ingroup realmd
  */
 
+#include <cstdint>
+#include <string>
+#include <memory>
+#include <mutex>
 #include "PatchHandler.h"
 #include "AuthCodes.h"
 #include "Log.h"
