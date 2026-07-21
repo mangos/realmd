@@ -26,7 +26,28 @@
  \ingroup realmd
  */
 
-#include "Common.h"
+// Socket headers for AF_INET / in_addr / addrinfo. These used to arrive
+// transitively through the ACE includes in the old Common.h; with that header
+// gone they have to be named.
+#ifdef _WIN32
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+#else
+#  include <arpa/inet.h>
+#  include <netdb.h>
+#  include <netinet/in.h>
+#  include <sys/socket.h>
+#  include <sys/types.h>
+#endif
+#include <cstdint>
+#include "Common/ServerDefines.h"
+#include "Utilities/Errors.h"
+#include "Platform/Define.h"
+#include "Common/Locales.h"
+#include <cstdio>
+#include <vector>
+#include <algorithm>
+#include <atomic>
 #include "Database/DatabaseEnv.h"
 #include "Config/Config.h"
 #include "Log.h"
