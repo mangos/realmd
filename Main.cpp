@@ -426,7 +426,7 @@ extern int main(int argc, char** argv)
     if (!providerManager.IsInitialized())
     {
         Log::WaitBeforeContinueIfNeed();
-        return 0;
+        return 1;
     }
 
     /// realmd PID file creation
