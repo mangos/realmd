@@ -86,3 +86,16 @@ if(WIN32 AND MSVC)
         OPTIONAL
         )
 endif()
+
+if(BUILD_TESTING)
+    add_executable(realmd_auth_protocol_tests
+        Tests/AuthProtocolGuardTests.cpp
+        Auth/AuthProtocolGuard.cpp
+    )
+    target_compile_features(realmd_auth_protocol_tests PUBLIC cxx_std_17)
+    set_target_properties(realmd_auth_protocol_tests PROPERTIES CXX_EXTENSIONS OFF)
+    target_include_directories(realmd_auth_protocol_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    add_test(NAME realmd_auth_protocol_tests COMMAND realmd_auth_protocol_tests)
+endif()
