@@ -357,6 +357,8 @@ std::vector<uint8_t> AuthSocket::onData(const uint8_t* data, size_t len)
                 continue;
             }
 
+            // InspectFrame is the primary state gate. Keep this table check as
+            // defense in depth against a future guard/dispatch mismatch.
             if (table[i].status != _status)
             {
                 DEBUG_LOG("[Auth] Received unauthorized command %u, length %u", (uint32)_cmd, (uint32)recv_len());
@@ -1149,11 +1151,11 @@ static uint32 ParseClientIPv4(const std::string& addr)
 bool AuthSocket::_HandleRealmList()
 {
     DEBUG_LOG("Entering _HandleRealmList");
-    if (recv_len() < 5)
+    if (recv_len() < MaNGOS::Auth::AuthRealmListSize)
     {
         return false;
     }
-    recv_skip(5);
+    recv_skip(MaNGOS::Auth::AuthRealmListSize);
 
     ///- Get the user id (else close the connection)
     // No SQL injection (escaped user name)
@@ -1349,7 +1351,7 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
 bool AuthSocket::_HandleXferAccept()
 {
     DEBUG_LOG("Entering _HandleXferAccept");
-    recv_skip(1);                                           // CMD_XFER_ACCEPT
+    recv_skip(MaNGOS::Auth::AuthXferAcceptSize);
     return BeginPatchStream(0);
 }
 
@@ -1357,14 +1359,15 @@ bool AuthSocket::_HandleXferAccept()
 bool AuthSocket::_HandleXferResume()
 {
     DEBUG_LOG("Entering _HandleXferResume");
-    if (recv_len() < 9)
+    if (recv_len() < MaNGOS::Auth::AuthXferResumeSize)
     {
         return false;
     }
-    recv_skip(1);                                           // CMD_XFER_RESUME
 
     uint64 start_pos;
-    recv((char*)&start_pos, 8);
+    recv_skip(MaNGOS::Auth::AuthXferResumeSize -
+              sizeof(start_pos));
+    recv((char*)&start_pos, sizeof(start_pos));
     EndianConvert(start_pos);
 
     return BeginPatchStream(start_pos);
@@ -1374,7 +1377,7 @@ bool AuthSocket::_HandleXferResume()
 bool AuthSocket::_HandleXferCancel()
 {
     DEBUG_LOG("Entering _HandleXferCancel");
-    recv_skip(1);                                           // CMD_XFER_CANCEL
+    recv_skip(MaNGOS::Auth::AuthXferCancelSize);
     close_connection();
     return true;
 }
