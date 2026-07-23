@@ -476,9 +476,23 @@ extern int main(int argc, char** argv)
     // Honour the configured BindIP: empty or "0.0.0.0" listens on every local
     // interface, otherwise realmd binds only that IPv4/hostname.
     std::string bindIp = sConfig.GetStringDefault("BindIP", "0.0.0.0");
+    int32 const configuredAuthTimeout =
+        sConfig.GetIntDefault("AuthSessionTimeout", 30);
+    uint32 authTimeoutSeconds = 30;
+    if (configuredAuthTimeout < 0)
+    {
+        sLog.outError(
+            "AuthSessionTimeout cannot be negative; using 30 seconds.");
+    }
+    else
+    {
+        authTimeoutSeconds = static_cast<uint32>(configuredAuthTimeout);
+    }
+
     AuthServer authServer;
 
-    if (!authServer.Start(rmport, bindIp))
+    if (!authServer.Start(
+            rmport, bindIp, std::chrono::seconds(authTimeoutSeconds)))
     {
         sLog.outError("MaNGOS realmd can not bind to port %d", rmport);
         Log::WaitBeforeContinueIfNeed();
@@ -545,6 +559,7 @@ extern int main(int argc, char** argv)
     // maximum counter for next ping
     uint32 numLoops = (sConfig.GetIntDefault("MaxPingTime", 30) * (MINUTE * 1000000 / 100000));
     uint32 loopCounter = 0;
+    uint32 logFlushCounter = 0;
 
 #ifndef WIN32
     detachDaemon();
@@ -554,6 +569,13 @@ extern int main(int argc, char** argv)
     while (!stopEvent)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        authServer.Update();
+
+        if ((++logFlushCounter) >= 10)
+        {
+            logFlushCounter = 0;
+            sLog.Flush();
+        }
 
         if ((++loopCounter) == numLoops)
         {
@@ -593,6 +615,7 @@ extern int main(int argc, char** argv)
     UnhookSignals();
 
     sLog.outString("Halting process...");
+    sLog.Flush();
     return exitCode;
 }
 

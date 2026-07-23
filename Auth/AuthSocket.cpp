@@ -54,6 +54,7 @@
 #include "Realm/RealmList.h"
 #include "AuthSocket.h"
 #include "AuthCodes.h"
+#include "AuthProtocolGuard.h"
 #include "PatchHandler.h"
 
 #include <openssl/md5.h>
@@ -164,8 +165,24 @@ typedef struct AuthHandler
 #pragma pack(pop)
 #endif
 
+static_assert(
+    sizeof(sAuthLogonChallenge_C) ==
+        MaNGOS::Auth::AuthChallengeHeaderSize +
+        MaNGOS::Auth::AuthChallengeMinimumBodySize,
+    "auth challenge wire layout changed");
+static_assert(
+    sizeof(sAuthLogonProof_C) == MaNGOS::Auth::AuthLogonProofSize,
+    "logon proof wire layout changed");
+static_assert(
+    sizeof(sAuthReconnectProof_C) == MaNGOS::Auth::AuthReconnectProofSize,
+    "reconnect proof wire layout changed");
+
 /// Constructor - set the N and g values for SRP6
-AuthSocket::AuthSocket() : _status(STATUS_CHALLENGE), _accountSecurityLevel(SEC_PLAYER), _build(0)
+AuthSocket::AuthSocket(std::chrono::seconds authTimeout)
+    : _status(STATUS_CHALLENGE),
+      m_authDeadline(MaNGOS::Auth::Deadline::Clock::now(), authTimeout),
+      _build(0),
+      _accountSecurityLevel(SEC_PLAYER)
 {
     N.SetHexStr("894B645E89E1535BBDAD5B8B290650530801B18EBFBF5E8FAB3C82872A3E9BB7");
     g.SetDword(7);
@@ -226,6 +243,7 @@ bool AuthSocket::send(const char* buf, size_t len)
 
 void AuthSocket::close_connection()
 {
+    deactivate_auth_deadline();
     if (!m_closed.exchange(true))
     {
         if (m_closer)
@@ -233,6 +251,52 @@ void AuthSocket::close_connection()
             m_closer();
         }
     }
+}
+
+void AuthSocket::onClose()
+{
+    deactivate_auth_deadline();
+    m_closed.store(true);
+}
+
+bool AuthSocket::ExpireAuthentication(
+    MaNGOS::Auth::Deadline::Clock::time_point now)
+{
+    if (!m_authDeadline.expired(now))
+    {
+        return false;
+    }
+
+    DEBUG_LOG("[Auth] Authentication deadline expired for '%s'",
+              get_remote_address().c_str());
+    close_connection();
+    return true;
+}
+
+MaNGOS::Auth::StreamState AuthSocket::stream_state() const
+{
+    switch (_status)
+    {
+        case STATUS_CHALLENGE:
+            return MaNGOS::Auth::StreamState::Challenge;
+        case STATUS_LOGON_PROOF:
+            return MaNGOS::Auth::StreamState::LogonProof;
+        case STATUS_RECON_PROOF:
+            return MaNGOS::Auth::StreamState::ReconnectProof;
+        case STATUS_PATCH:
+            return MaNGOS::Auth::StreamState::Patch;
+        case STATUS_AUTHED:
+            return MaNGOS::Auth::StreamState::Authenticated;
+        case STATUS_CLOSED:
+            return MaNGOS::Auth::StreamState::Closed;
+    }
+
+    return MaNGOS::Auth::StreamState::Closed;
+}
+
+void AuthSocket::deactivate_auth_deadline()
+{
+    m_authDeadline.deactivate();
 }
 
 /// Log the accepted connection (net thread, once, before any client bytes).
@@ -250,10 +314,21 @@ std::vector<uint8_t> AuthSocket::onData(const uint8_t* data, size_t len)
         return {};
     }
 
-    // Append newly received bytes to the pending buffer, then run the command
-    // loop over it. TCP is a stream, so a handler may find the buffer short and
-    // bail; anything not consumed this pass stays buffered for the next onData().
-    m_readBuf.insert(m_readBuf.end(), data, data + len);
+    if (!MaNGOS::Auth::CanAppendPending(m_readBuf.size(), len))
+    {
+        DEBUG_LOG("[Auth] Closing connection: pending input limit exceeded");
+        m_readBuf.clear();
+        m_readPos = 0;
+        close_connection();
+        return {};
+    }
+
+    // Append newly received bytes to the pending buffer, then preflight complete
+    // protocol frames before a handler is allowed to consume any bytes.
+    if (len > 0)
+    {
+        m_readBuf.insert(m_readBuf.end(), data, data + len);
+    }
     m_readPos = 0;
 
     const static AuthHandler table[] =
@@ -273,10 +348,26 @@ std::vector<uint8_t> AuthSocket::onData(const uint8_t* data, size_t len)
 
     while (!m_closed.load())
     {
-        if (!recv_soft((char*)&_cmd, 1))
+        MaNGOS::Auth::FrameDecision const decision =
+            MaNGOS::Auth::InspectFrame(
+                stream_state(), m_readBuf.data() + m_readPos, recv_len());
+
+        if (decision.status == MaNGOS::Auth::FrameStatus::Incomplete)
         {
             break;
         }
+        if (decision.status == MaNGOS::Auth::FrameStatus::Reject)
+        {
+            DEBUG_LOG("[Auth] Closing rejected auth stream, reason %u",
+                      static_cast<unsigned>(decision.reason));
+            m_readBuf.clear();
+            m_readPos = 0;
+            close_connection();
+            return {};
+        }
+
+        _cmd = m_readBuf[m_readPos];
+        size_t const frameStart = m_readPos;
 
         size_t i;
         ///- Circle through known commands and call the correct command handler
@@ -287,10 +378,12 @@ std::vector<uint8_t> AuthSocket::onData(const uint8_t* data, size_t len)
                 continue;
             }
 
+            // InspectFrame is the primary state gate. Keep this table check as
+            // defense in depth against a future guard/dispatch mismatch.
             if (table[i].status != _status)
             {
                 DEBUG_LOG("[Auth] Received unauthorized command %u, length %u", (uint32)_cmd, (uint32)recv_len());
-                i = AUTH_TOTAL_COMMANDS;    // force loop exit below
+                i = AUTH_TOTAL_COMMANDS;
                 break;
             }
 
@@ -298,15 +391,25 @@ std::vector<uint8_t> AuthSocket::onData(const uint8_t* data, size_t len)
             if (!(*this.*table[i].handler)())
             {
                 DEBUG_LOG("[Auth] Command handler failed for cmd %u, length %u", (uint32)_cmd, (uint32)recv_len());
-                i = AUTH_TOTAL_COMMANDS;    // force loop exit below
+                i = AUTH_TOTAL_COMMANDS;
+                break;
+            }
+
+            if (m_readPos - frameStart != decision.frameSize)
+            {
+                DEBUG_LOG("[Auth] Handler consumed an unexpected frame length");
+                i = AUTH_TOTAL_COMMANDS;
             }
             break;
         }
 
-        ///- Report unknown / unauthorized / failed commands and stop processing
+        ///- A preflighted command must be handled fully or the stream is closed.
         if (i == AUTH_TOTAL_COMMANDS)
         {
-            DEBUG_LOG("[Auth] Stop processing at command %u", (uint32)_cmd);
+            DEBUG_LOG("[Auth] Closing connection at command %u", (uint32)_cmd);
+            m_readBuf.clear();
+            m_readPos = 0;
+            close_connection();
             break;
         }
     }
@@ -416,11 +519,9 @@ bool AuthSocket::_HandleLogonChallenge()
 
     recv((char*)&buf[0], 4);
 
-#ifdef MANGOS_BIGENDIAN
-    EndianConvert(*((uint16*)(buf[0])));
-#endif
-
-    uint16 remaining = ((sAuthLogonChallenge_C*)&buf[0])->size;
+    uint16 const remaining =
+        static_cast<uint16>(buf[2]) |
+        (static_cast<uint16>(buf[3]) << 8);
     DEBUG_LOG("[AuthChallenge] got header, body is %#04x bytes", remaining);
 
     if ((remaining < sizeof(sAuthLogonChallenge_C) - buf.size()) || (recv_len() < remaining))
@@ -683,6 +784,7 @@ bool AuthSocket::_HandleLogonProof()
 
             ///- Wait for the client's XFER accept/resume/cancel.
             _status = STATUS_PATCH;
+            deactivate_auth_deadline();
             DEBUG_LOG("[AuthChallenge] offering patch %s (%llu bytes) to build %u",
                       patchFile.c_str(), (unsigned long long)fileSize, _build);
             return true;
@@ -827,6 +929,7 @@ bool AuthSocket::_HandleLogonProof()
 
         ///- Set _status to authenticated
         _status = STATUS_AUTHED;
+        deactivate_auth_deadline();
         s_authed.fetch_add(1, std::memory_order_relaxed);
     }
     else
@@ -900,8 +1003,9 @@ bool AuthSocket::_HandleReconnectChallenge()
 
     recv((char*)&buf[0], 4);
 
-    EndianConvert(*((uint16*)(buf[0])));
-    uint16 remaining = ((sAuthLogonChallenge_C*)&buf[0])->size;
+    uint16 const remaining =
+        static_cast<uint16>(buf[2]) |
+        (static_cast<uint16>(buf[3]) << 8);
     DEBUG_LOG("[ReconnectChallenge] got header, body is %#04x bytes", remaining);
 
     if ((remaining < sizeof(sAuthLogonChallenge_C) - buf.size()) || (recv_len() < remaining))
@@ -1008,6 +1112,7 @@ bool AuthSocket::_HandleReconnectProof()
 
         ///- Set _status to authenticated!
         _status = STATUS_AUTHED;
+        deactivate_auth_deadline();
         s_authed.fetch_add(1, std::memory_order_relaxed);
 
         return true;
@@ -1067,11 +1172,11 @@ static uint32 ParseClientIPv4(const std::string& addr)
 bool AuthSocket::_HandleRealmList()
 {
     DEBUG_LOG("Entering _HandleRealmList");
-    if (recv_len() < 5)
+    if (recv_len() < MaNGOS::Auth::AuthRealmListSize)
     {
         return false;
     }
-    recv_skip(5);
+    recv_skip(MaNGOS::Auth::AuthRealmListSize);
 
     ///- Get the user id (else close the connection)
     // No SQL injection (escaped user name)
@@ -1267,7 +1372,7 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
 bool AuthSocket::_HandleXferAccept()
 {
     DEBUG_LOG("Entering _HandleXferAccept");
-    recv_skip(1);                                           // CMD_XFER_ACCEPT
+    recv_skip(MaNGOS::Auth::AuthXferAcceptSize);
     return BeginPatchStream(0);
 }
 
@@ -1275,14 +1380,15 @@ bool AuthSocket::_HandleXferAccept()
 bool AuthSocket::_HandleXferResume()
 {
     DEBUG_LOG("Entering _HandleXferResume");
-    if (recv_len() < 9)
+    if (recv_len() < MaNGOS::Auth::AuthXferResumeSize)
     {
         return false;
     }
-    recv_skip(1);                                           // CMD_XFER_RESUME
 
     uint64 start_pos;
-    recv((char*)&start_pos, 8);
+    recv_skip(MaNGOS::Auth::AuthXferResumeSize -
+              sizeof(start_pos));
+    recv(reinterpret_cast<char*>(&start_pos), sizeof(start_pos));
     EndianConvert(start_pos);
 
     return BeginPatchStream(start_pos);
@@ -1292,7 +1398,7 @@ bool AuthSocket::_HandleXferResume()
 bool AuthSocket::_HandleXferCancel()
 {
     DEBUG_LOG("Entering _HandleXferCancel");
-    recv_skip(1);                                           // CMD_XFER_CANCEL
+    recv_skip(MaNGOS::Auth::AuthXferCancelSize);
     close_connection();
     return true;
 }
@@ -1318,4 +1424,3 @@ bool AuthSocket::BeginPatchStream(uint64 startOffset)
 
     return true;
 }
-
