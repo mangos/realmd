@@ -29,6 +29,7 @@
 #ifndef MANGOS_H_AUTHSERVER
 #define MANGOS_H_AUTHSERVER
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -52,7 +53,13 @@ class AuthServer
         /// configured BindIP: empty (or "0.0.0.0") listens on every local
         /// interface, otherwise the listener binds that single IPv4/hostname.
         /// @return true on success, false if the port could not be bound.
-        bool Start(uint16_t port, const std::string& bindIp = std::string());
+        bool Start(
+            uint16_t port,
+            const std::string& bindIp = std::string(),
+            std::chrono::seconds authTimeout = std::chrono::seconds(30));
+
+        /// Expire sockets that have not completed authentication in time.
+        void Update();
 
         /// Stop the network engine and join its worker threads.
         void Stop();

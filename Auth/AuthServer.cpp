@@ -31,13 +31,20 @@
 
 #include "net/Server.hpp"
 
+#include <chrono>
 #include <memory>
+#include <mutex>
+#include <utility>
+#include <vector>
 
 /// Holds the value-type networking engine, kept in the .cpp so its platform
 /// headers stay out of AuthServer.h (and therefore out of Main.cpp).
 struct AuthServer::Impl
 {
     net::Server server;
+    std::mutex socketsMutex;
+    std::vector<std::weak_ptr<AuthSocket>> sockets;
+    std::chrono::seconds authTimeout{30};
 };
 
 AuthServer::AuthServer()
@@ -50,12 +57,52 @@ AuthServer::~AuthServer()
     Stop();
 }
 
-bool AuthServer::Start(uint16_t port, const std::string& bindIp)
+bool AuthServer::Start(
+    uint16_t port,
+    const std::string& bindIp,
+    std::chrono::seconds authTimeout)
 {
-    return m_impl->server.start(port, []() -> std::shared_ptr<net::ISession>
+    m_impl->authTimeout = authTimeout;
+    Impl* const impl = m_impl.get();
+
+    return m_impl->server.start(port, [impl]() -> std::shared_ptr<net::ISession>
     {
-        return std::make_shared<AuthSocket>();
+        std::shared_ptr<AuthSocket> socket =
+            std::make_shared<AuthSocket>(impl->authTimeout);
+        {
+            std::lock_guard<std::mutex> lock(impl->socketsMutex);
+            impl->sockets.emplace_back(socket);
+        }
+        return socket;
     }, bindIp);
+}
+
+void AuthServer::Update()
+{
+    std::vector<std::shared_ptr<AuthSocket>> sockets;
+    {
+        std::lock_guard<std::mutex> lock(m_impl->socketsMutex);
+        auto socket = m_impl->sockets.begin();
+        while (socket != m_impl->sockets.end())
+        {
+            if (std::shared_ptr<AuthSocket> active = socket->lock())
+            {
+                sockets.push_back(std::move(active));
+                ++socket;
+            }
+            else
+            {
+                socket = m_impl->sockets.erase(socket);
+            }
+        }
+    }
+
+    MaNGOS::Auth::Deadline::Clock::time_point const now =
+        MaNGOS::Auth::Deadline::Clock::now();
+    for (std::shared_ptr<AuthSocket> const& socket : sockets)
+    {
+        socket->ExpireAuthentication(now);
+    }
 }
 
 void AuthServer::Stop()
@@ -63,5 +110,7 @@ void AuthServer::Stop()
     if (m_impl)
     {
         m_impl->server.stop();
+        std::lock_guard<std::mutex> lock(m_impl->socketsMutex);
+        m_impl->sockets.clear();
     }
 }

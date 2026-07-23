@@ -35,6 +35,12 @@ ConfVersion=@MANGOS_REALM_VER@
 #        Port on which the server will listen
 #        Default: 3724
 #
+#    AuthSessionTimeout
+#        Maximum seconds allowed to complete logon or reconnect authentication.
+#        Authenticated sessions and patch transfers are exempt.
+#        Default: 30
+#                 0 (Disabled)
+#
 #    BindIP
 #        Bind realm list demon to IP/hostname
 #        DO NOT CHANGE THIS UNLESS YOU _REALLY_ KNOW WHAT YOU'RE DOING
@@ -130,6 +136,7 @@ PidFile                = ""
 
 MaxPingTime            = 30
 RealmServerPort        = 3724
+AuthSessionTimeout     = 30
 BindIP                 = "0.0.0.0"
 
 LogLevel               = 0
