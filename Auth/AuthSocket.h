@@ -32,12 +32,14 @@
 #include "Common.h"
 #include "Auth/BigNumber.h"
 #include "Auth/Sha1.h"
+#include "AuthProtocolGuard.h"
 #include "ByteBuffer.h"
 #include "Utilities/Util.h"
 
 #include "net/ISession.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -61,7 +63,8 @@ class AuthSocket: public net::ISession
          * @brief
          *
          */
-        AuthSocket();
+        explicit AuthSocket(
+            std::chrono::seconds authTimeout = std::chrono::seconds(30));
 
         /**
          * @brief
@@ -76,8 +79,12 @@ class AuthSocket: public net::ISession
         void setFlowControl(std::shared_ptr<net::FlowControl> fc) override { m_flowControl = std::move(fc); }
         std::vector<uint8_t> onConnect() override;
         std::vector<uint8_t> onData(const uint8_t* data, size_t len) override;
-        void onClose() override { m_closed.store(true); }
+        void onClose() override;
         bool closed() const override { return m_closed.load(); }
+
+        /// Close an unauthenticated connection whose configured deadline elapsed.
+        bool ExpireAuthentication(
+            MaNGOS::Auth::Deadline::Clock::time_point now);
 
         /**
          * @brief
@@ -189,6 +196,8 @@ class AuthSocket: public net::ISession
         bool send(const char* buf, size_t len);
         const std::string& get_remote_address() const { return remote_address_; }
         void close_connection();
+        MaNGOS::Auth::StreamState stream_state() const;
+        void deactivate_auth_deadline();
 
         std::vector<uint8_t> m_readBuf;      ///< pending unconsumed inbound bytes
         size_t               m_readPos = 0;  ///< consume cursor within m_readBuf
@@ -206,6 +215,7 @@ class AuthSocket: public net::ISession
         BigNumber _reconnectProof; /**< TODO */
 
         eStatus _status; /**< TODO */
+        MaNGOS::Auth::Deadline m_authDeadline;
 
         std::string _login; /**< TODO */
         std::string _safelogin; /**< TODO */
