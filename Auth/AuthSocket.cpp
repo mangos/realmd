@@ -1367,7 +1367,7 @@ bool AuthSocket::_HandleXferResume()
     uint64 start_pos;
     recv_skip(MaNGOS::Auth::AuthXferResumeSize -
               sizeof(start_pos));
-    recv((char*)&start_pos, sizeof(start_pos));
+    recv(reinterpret_cast<char*>(&start_pos), sizeof(start_pos));
     EndianConvert(start_pos);
 
     return BeginPatchStream(start_pos);
