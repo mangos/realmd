@@ -112,4 +112,10 @@ if(BUILD_TESTING)
         Threads::Threads
     )
     add_test(NAME realmd_realm_snapshot_tests COMMAND realmd_realm_snapshot_tests)
+
+    add_test(NAME realmd_auth_safety_policy
+        COMMAND ${CMAKE_COMMAND}
+            -DREALMD_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CheckAuthSafety.cmake
+    )
 endif()

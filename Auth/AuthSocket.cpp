@@ -886,39 +886,26 @@ bool AuthSocket::_HandleLogonProof()
         // No SQL injection (escaped user name and OS) and IP address as received by socket
         const char* K_hex = K.AsHexStr();
 
-        // Use synchronous write to help ensure mangosd gets the correct key
         LoginDatabase.escape_string(_os);
-        LoginDatabase.Execute("START TRANSACTION");
-        char updateQuery[512];
-        snprintf(updateQuery, sizeof(updateQuery),
-                "UPDATE `account` SET `sessionkey` = '%s', `last_ip` = '%s', `last_login` = NOW(), `locale` = '%u', `os` = '%s', `failed_logins` = 0 WHERE `username` = '%s'",
-            K_hex, get_remote_address().c_str(), GetLocaleByName(_localizationName), _os.c_str(), _safelogin.c_str());
-        LoginDatabase.Execute(updateQuery);
-        LoginDatabase.Execute("COMMIT");
-        LoginDatabase.Execute("FLUSH TABLES");
-
-        // Verify the new key is available for reads before mangosd tries, gets the old key, and fails
-        bool keyVerified = false;
-        for (int attempts = 0; attempts < 1000 && !keyVerified; attempts++)
+        if (!LoginDatabase.DirectPExecute(
+            "UPDATE `account` SET `sessionkey` = '%s', `last_ip` = '%s', "
+            "`last_login` = NOW(), `locale` = '%u', `os` = '%s', "
+            "`failed_logins` = 0 WHERE `username` = '%s'",
+            K_hex,
+            get_remote_address().c_str(),
+            GetLocaleByName(_localizationName),
+            _os.c_str(),
+            _safelogin.c_str()))
         {
-            QueryResult* verify = LoginDatabase.PQuery("SELECT `sessionkey` FROM `account` WHERE `username` = '%s'", _safelogin.c_str());
-            if (verify)
-            {
-                Field* vf = verify->Fetch();
-                const char *sessionkey = vf->GetString();
-                if (sessionkey && K_hex && strcmp(sessionkey, K_hex) == 0)
-                {
-                    keyVerified = true;
-                }
-                delete verify;
-            }
-            if (!keyVerified)
-            {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
+            sLog.outError(
+                "[Auth] Failed to publish session key for account %s",
+                _login.c_str());
+            OPENSSL_free(const_cast<char*>(K_hex));
+            close_connection();
+            return false;
         }
-        // Write of new key should be verified, so allow the client to proceed to mangosd
-        OPENSSL_free((void*)K_hex);
+
+        OPENSSL_free(const_cast<char*>(K_hex));
 
         ///- Finish SRP6 and send the final result to the client
         sha.Initialize();
