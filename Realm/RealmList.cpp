@@ -133,7 +133,7 @@ RealmBuildInfo const* FindBuildInfo(uint16 _build)
     return NULL;
 }
 
-RealmList::RealmList() : m_UpdateInterval(0), m_NextUpdateTime(time(NULL))
+RealmList::RealmList()
 {
 }
 
@@ -156,44 +156,27 @@ RealmVersion RealmList::BelongsToVersion(uint32 build) const
     }
 }
 
-RealmList::RealmListIterators RealmList::GetIteratorsForBuild(uint32 build) const
+RealmListView RealmList::GetRealmsForBuild(uint32 build) const
 {
-    RealmVersion version = BelongsToVersion(build);
-    if (version >= REALM_VERSION_COUNT)
-    {
-        return RealmListIterators(
-            m_realmsByVersion[0].end(),
-            m_realmsByVersion[0].end()
-            );
-    }
-    return RealmListIterators(
-        m_realmsByVersion[uint32(version)].begin(),
-        m_realmsByVersion[uint32(version)].end()
-        );
-
+    return RealmListView(m_snapshots.Load(), BelongsToVersion(build));
 }
 
 /// Load the realm list from the database
 void RealmList::Initialize(uint32 updateInterval)
 {
-    m_UpdateInterval = updateInterval;
-
     InitBuildToVersion();
 
     ///- Get the content of the realmlist table in the database
-    UpdateRealms(true);
+    m_snapshots.Publish(BuildSnapshot(true));
+    m_refreshGate.Reset(updateInterval, time(NULL));
 }
 
-uint32 RealmList::NumRealmsForBuild(uint32 build) const
-{
-    return m_realmsByVersion[BelongsToVersion(build)].size();
-}
-
-void RealmList::AddRealmToBuildList(const Realm& realm)
+void RealmList::AddRealmToBuildList(
+    RealmSnapshot& snapshot, Realm const& realm)
 {
     RealmBuilds builds = realm.realmbuilds;
     int buildNumber = *(builds.begin());
-    m_realmsByVersion[BelongsToVersion(buildNumber)].push_back(&realm);
+    snapshot.realmsByVersion[BelongsToVersion(buildNumber)].push_back(&realm);
 }
 
 void RealmList::InitBuildToVersion()
@@ -220,10 +203,23 @@ void RealmList::InitBuildToVersion()
     m_buildToVersion[40000] = REALM_VERSION_SHADOWLANDS;
 }
 
-void RealmList::UpdateRealm(uint32 ID, const std::string& name, RealmAddress const& address, RealmAddress const& localAddr, RealmAddress const& localSubmask, uint32 port, uint8 icon, RealmFlags realmflags, uint8 timezone, AccountTypes allowedSecurityLevel, float popu, const std::string& builds)
+void RealmList::UpdateRealm(
+    RealmSnapshot& snapshot,
+    uint32 ID,
+    const std::string& name,
+    RealmAddress const& address,
+    RealmAddress const& localAddr,
+    RealmAddress const& localSubmask,
+    uint32 port,
+    uint8 icon,
+    RealmFlags realmflags,
+    uint8 timezone,
+    AccountTypes allowedSecurityLevel,
+    float popu,
+    const std::string& builds)
 {
     ///- Create new if not exist or update existed
-    Realm& realm = m_realms[name];
+    Realm& realm = snapshot.realms[name];
 
     realm.m_ID       = ID;
     realm.name       = name;
@@ -246,7 +242,7 @@ void RealmList::UpdateRealm(uint32 ID, const std::string& name, RealmAddress con
 
     if (first_build)
     {
-        AddRealmToBuildList(realm);
+        AddRealmToBuildList(snapshot, realm);
     }
     else
     {
@@ -278,28 +274,16 @@ void RealmList::UpdateRealm(uint32 ID, const std::string& name, RealmAddress con
 
 void RealmList::UpdateIfNeed()
 {
-    // maybe disabled or updated recently
-    if (!m_UpdateInterval || m_NextUpdateTime > time(NULL))
+    m_refreshGate.RunIfDue(time(NULL), [this]
     {
-        return;
-    }
-
-    m_NextUpdateTime = time(NULL) + m_UpdateInterval;
-
-    // Clears Realm list
-    m_realms.clear();
-    for (int i = 0; i < REALM_VERSION_COUNT; ++i)
-    {
-        m_realmsByVersion[i].clear();
-    }
-
-    // Get the content of the realmlist table in the database
-    UpdateRealms(false);
+        m_snapshots.Publish(BuildSnapshot(false));
+    });
 }
 
-void RealmList::UpdateRealms(bool init)
+std::shared_ptr<RealmSnapshot> RealmList::BuildSnapshot(bool init)
 {
     DETAIL_LOG("Updating Realm List...");
+    auto snapshot = std::make_shared<RealmSnapshot>();
 
     ////                                               0     1       2          3               4                  5       6       7             8           9                       10            11
     QueryResult* result = LoginDatabase.Query("SELECT `id`, `name`, `address`, `localAddress`, `localSubnetMask`, `port`, `icon`, `realmflags`, `timezone`, `allowedSecurityLevel`, `population`, `realmbuilds` FROM `realmlist` WHERE (`realmflags` & 1) = 0 ORDER BY `name`");
@@ -334,7 +318,7 @@ void RealmList::UpdateRealms(bool init)
                 realmflags &= (REALM_FLAG_OFFLINE | REALM_FLAG_NEW_PLAYERS | REALM_FLAG_RECOMMENDED | REALM_FLAG_SPECIFYBUILD);
             }
 
-            UpdateRealm(Id, name, externalAddr, localAddr, submask, port, icon, RealmFlags(realmflags), timezone, (allowedSecurityLevel <= SEC_ADMINISTRATOR ? AccountTypes(allowedSecurityLevel) : SEC_ADMINISTRATOR), population, realmbuilds);
+            UpdateRealm(*snapshot, Id, name, externalAddr, localAddr, submask, port, icon, RealmFlags(realmflags), timezone, (allowedSecurityLevel <= SEC_ADMINISTRATOR ? AccountTypes(allowedSecurityLevel) : SEC_ADMINISTRATOR), population, realmbuilds);
 
             if (init)
             {
@@ -344,4 +328,6 @@ void RealmList::UpdateRealms(bool init)
         while (result->NextRow());
         delete result;
     }
+
+    return snapshot;
 }

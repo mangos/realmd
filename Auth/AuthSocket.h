@@ -36,6 +36,7 @@
 #include "Auth/BigNumber.h"
 #include "Auth/Sha1.h"
 #include "AuthProtocolGuard.h"
+#include "PatchPolicy.h"
 #include "ByteBuffer.h"
 #include "Utilities/Util.h"
 
@@ -49,6 +50,7 @@
 
 struct Realm;
 struct RealmAddress;
+class PatchArtifact;
 
 /**
  * @brief Handle login commands.
@@ -67,7 +69,8 @@ class AuthSocket: public net::ISession
          *
          */
         explicit AuthSocket(
-            std::chrono::seconds authTimeout = std::chrono::seconds(30));
+            std::chrono::seconds authTimeout = std::chrono::seconds(30),
+            PatchPolicy patchPolicy = PatchPolicy());
 
         /**
          * @brief
@@ -186,6 +189,8 @@ class AuthSocket: public net::ISession
         /// Kick off the background patch stream for the offered archive, honouring
         /// an XFER_RESUME start offset. Closes the connection on failure.
         bool BeginPatchStream(uint64 startOffset);
+        bool OfferPatch();
+        void SendInvalidVersion();
 
         // --- Buffered-stream emulation (formerly provided by BufferedSocket) ----
         // net::ISession delivers raw bytes via onData(); these mirror the old
@@ -225,7 +230,8 @@ class AuthSocket: public net::ISession
 
         std::string _localizationName; /**< Since GetLocaleByName() is _NOT_ bijective, we have to store the locale as a string. Otherwise we can't differ between enUS and enGB, which is important for the patch system */
         std::string _os;
-        std::string _patchPath; /**< resolved ./patches archive offered to an unsupported build, empty if none */
+        PatchPolicy _patchPolicy;
+        std::unique_ptr<PatchArtifact> m_patchArtifact;
         uint16 _build; /**< TODO */
         AccountTypes _accountSecurityLevel; /**< TODO */
 

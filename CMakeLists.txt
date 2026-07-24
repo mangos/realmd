@@ -98,4 +98,65 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
     add_test(NAME realmd_auth_protocol_tests COMMAND realmd_auth_protocol_tests)
+
+    add_executable(realmd_realm_snapshot_tests
+        Tests/RealmSnapshotTests.cpp
+    )
+    target_compile_features(realmd_realm_snapshot_tests PUBLIC cxx_std_17)
+    set_target_properties(realmd_realm_snapshot_tests PROPERTIES CXX_EXTENSIONS OFF)
+    target_include_directories(realmd_realm_snapshot_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(realmd_realm_snapshot_tests PRIVATE
+        shared
+        Threads::Threads
+    )
+    add_test(NAME realmd_realm_snapshot_tests COMMAND realmd_realm_snapshot_tests)
+
+    add_test(NAME realmd_auth_safety_policy
+        COMMAND ${CMAKE_COMMAND}
+            -DREALMD_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CheckAuthSafety.cmake
+    )
+
+    add_executable(realmd_patch_safety_tests
+        Tests/PatchSafetyTests.cpp
+        Auth/PatchPolicy.cpp
+        Auth/PatchArtifact.cpp
+    )
+    target_compile_features(realmd_patch_safety_tests PUBLIC cxx_std_17)
+    set_target_properties(realmd_patch_safety_tests PROPERTIES CXX_EXTENSIONS OFF)
+    target_include_directories(realmd_patch_safety_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(realmd_patch_safety_tests PRIVATE
+        mangos_openssl
+        mangos_openssl_strict
+    )
+    if(WIN32)
+        find_file(REALMD_TEST_OPENSSL_CRYPTO_DLL
+            NAMES libcrypto-3-x64.dll libcrypto-3.dll
+            HINTS "${OPENSSL_ROOT_DIR}/bin"
+            NO_DEFAULT_PATH
+        )
+        if(NOT REALMD_TEST_OPENSSL_CRYPTO_DLL)
+            message(FATAL_ERROR
+                "Could not find the OpenSSL 3.x crypto runtime DLL under "
+                "${OPENSSL_ROOT_DIR}/bin")
+        endif()
+        add_custom_command(TARGET realmd_patch_safety_tests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${REALMD_TEST_OPENSSL_CRYPTO_DLL}"
+                "$<TARGET_FILE_DIR:realmd_patch_safety_tests>"
+            COMMENT
+                "realmd_patch_safety_tests: co-locating the OpenSSL runtime"
+        )
+    endif()
+    add_test(NAME realmd_patch_safety_tests COMMAND realmd_patch_safety_tests)
+
+    add_test(NAME realmd_patch_safety_policy
+        COMMAND ${CMAKE_COMMAND}
+            -DREALMD_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CheckPatchSafety.cmake
+    )
 endif()
