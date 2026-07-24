@@ -52,6 +52,7 @@
 #include "Config/Config.h"
 #include "GitRevision.h"
 #include "Log.h"
+#include "Auth/PatchPolicy.h"
 #include "Auth/AuthSocket.h"
 #include "Auth/AuthServer.h"
 #include "SystemConfig.h"
@@ -66,6 +67,7 @@
 #include <chrono>
 #include <cstring>
 #include <thread>
+#include <utility>
 
 #ifdef WIN32
 #include "ServiceWin32.h"
@@ -489,10 +491,24 @@ extern int main(int argc, char** argv)
         authTimeoutSeconds = static_cast<uint32>(configuredAuthTimeout);
     }
 
+    bool const patchEnabled =
+        sConfig.GetBoolDefault("Patch.Enable", true);
+    auto patchPolicy = PatchPolicy::Parse(
+        patchEnabled,
+        sConfig.GetStringDefault("Patch.ForceBuilds", ""));
+    if (!patchPolicy)
+    {
+        sLog.outError("Invalid Patch.ForceBuilds configuration");
+        return 1;
+    }
+
     AuthServer authServer;
 
     if (!authServer.Start(
-            rmport, bindIp, std::chrono::seconds(authTimeoutSeconds)))
+            rmport,
+            bindIp,
+            std::chrono::seconds(authTimeoutSeconds),
+            std::move(*patchPolicy)))
     {
         sLog.outError("MaNGOS realmd can not bind to port %d", rmport);
         Log::WaitBeforeContinueIfNeed();

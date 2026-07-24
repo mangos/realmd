@@ -29,45 +29,12 @@
 #ifndef MANGOS_H_PATCHHANDLER
 #define MANGOS_H_PATCHHANDLER
 
-#include <memory>
 #include "net/ISession.hpp"
 
-#include <array>
 #include <cstdint>
-#include <map>
-#include <mutex>
-#include <string>
+#include <memory>
 
-#include <openssl/md5.h>
-
-/**
- * @brief Caches the MD5 of client patch archives under ./patches.
- *
- * A build that the server does not support can be lifted to a supported one by
- * dropping a "<build><locale>.mpq" archive in ./patches; realmd streams it to
- * the client (the classic background-downloader flow). The XFER_INITIATE packet
- * carries the archive's MD5 so the client can verify the download, and this
- * cache avoids re-hashing the (potentially large) file on every logon attempt.
- * Thread-safe: the SRP6 handlers run on the network thread and the streaming
- * runs on its own thread.
- */
-class PatchCache
-{
-    public:
-        static PatchCache* instance();
-
-        /// Look up (computing and caching on first use) the MD5 of the patch at
-        /// `fullPath`. Returns false if the file cannot be read.
-        bool GetMD5(const std::string& fullPath, uint8_t outMd5[MD5_DIGEST_LENGTH]);
-
-    private:
-        PatchCache() = default;
-
-        bool ComputeMD5(const std::string& fullPath, uint8_t outMd5[MD5_DIGEST_LENGTH]);
-
-        std::mutex                                                    m_mutex;
-        std::map<std::string, std::array<uint8_t, MD5_DIGEST_LENGTH>> m_cache;
-};
+class PatchArtifact;
 
 /**
  * @brief Stream a patch archive to a client on a detached background thread.
@@ -81,11 +48,14 @@ class PatchCache
  * fully read (to tear the connection down); on success the socket is left open
  * for the client to close once it has the whole archive.
  *
- * @return false if the file cannot be opened at `startOffset` (nothing spawned).
+ * The artifact is the same open stream whose size and digest were advertised.
+ *
+ * @return false if the artifact or resume offset is invalid (nothing spawned).
  */
 bool StartPatchTransfer(net::Sender sender, net::Closer closer,
                         std::shared_ptr<net::FlowControl> flow,
-                        const std::string& path, uint64_t startOffset);
+                        std::unique_ptr<PatchArtifact> artifact,
+                        std::uint64_t startOffset);
 
 #endif
 /// @}

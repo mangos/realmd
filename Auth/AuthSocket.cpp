@@ -55,15 +55,15 @@
 #include "AuthSocket.h"
 #include "AuthCodes.h"
 #include "AuthProtocolGuard.h"
+#include "PatchArtifact.h"
 #include "PatchHandler.h"
 
 #include <openssl/md5.h>
 
 #include <chrono>
 #include <cstring>
-#include <fstream>
 #include <string>
-#include <thread>
+#include <utility>
 
 extern DatabaseType LoginDatabase;
 
@@ -178,9 +178,11 @@ static_assert(
     "reconnect proof wire layout changed");
 
 /// Constructor - set the N and g values for SRP6
-AuthSocket::AuthSocket(std::chrono::seconds authTimeout)
+AuthSocket::AuthSocket(
+    std::chrono::seconds authTimeout, PatchPolicy patchPolicy)
     : _status(STATUS_CHALLENGE),
       m_authDeadline(MaNGOS::Auth::Deadline::Clock::now(), authTimeout),
+      _patchPolicy(std::move(patchPolicy)),
       _build(0),
       _accountSecurityLevel(SEC_PLAYER)
 {
@@ -747,60 +749,6 @@ bool AuthSocket::_HandleLogonProof()
 
     _status = STATUS_CLOSED;
 
-    ///- Check if the client has one of the expected version numbers
-    bool valid_version = FindBuildInfo(_build) != NULL;
-
-    /// <ul><li> If the client has no valid version, offer a patch archive if one
-    /// matching this build+locale is present under ./patches; otherwise reject it.
-    if (!valid_version)
-    {
-        // Archive name mirrors the classic downloader: "<build><locale>.mpq"
-        // (e.g. "5875enGB.mpq"). Kept relative to the working directory as before.
-        std::string patchFile = "./patches/" + std::to_string(_build) + _localizationName + ".mpq";
-
-        uint64 fileSize = 0;
-        {
-            std::ifstream patch(patchFile, std::ios::binary | std::ios::ate);
-            if (patch)
-            {
-                fileSize = uint64(patch.tellg());
-            }
-        }
-
-        XFER_INIT xferh;
-        if (fileSize > 0 && PatchCache::instance()->GetMD5(patchFile, xferh.md5))
-        {
-            xferh.cmd         = CMD_XFER_INITIATE;
-            xferh.fileNameLen = 5;
-            memcpy(xferh.fileName, "Patch", 5);
-            xferh.file_size   = fileSize;
-
-            _patchPath = patchFile;
-
-            ///- Tell the client an update is available, then describe the transfer.
-            uint8 data[2] = { CMD_AUTH_LOGON_PROOF, WOW_FAIL_VERSION_UPDATE };
-            send((const char*)data, sizeof(data));
-            send((const char*)&xferh, sizeof(xferh));
-
-            ///- Wait for the client's XFER accept/resume/cancel.
-            _status = STATUS_PATCH;
-            deactivate_auth_deadline();
-            DEBUG_LOG("[AuthChallenge] offering patch %s (%llu bytes) to build %u",
-                      patchFile.c_str(), (unsigned long long)fileSize, _build);
-            return true;
-        }
-
-        ByteBuffer pkt;
-        pkt << (uint8) CMD_AUTH_LOGON_CHALLENGE;
-        pkt << (uint8) 0x00;
-        pkt << (uint8) WOW_FAIL_VERSION_INVALID;
-        DEBUG_LOG("[AuthChallenge] %u is not a valid client version!", _build);
-        DEBUG_LOG("[AuthChallenge] Patch %s not found", patchFile.c_str());
-        send((char const*)pkt.contents(), pkt.size());
-        return true;
-    }
-    /// </ul>
-
     ///- Continue the SRP6 calculation based on data received from the client
     BigNumber A;
 
@@ -881,6 +829,17 @@ bool AuthSocket::_HandleLogonProof()
     if (!memcmp(M.AsByteArray(), lp.M1, 20))
     {
         BASIC_LOG("User '%s' successfully authenticated", _login.c_str());
+
+        bool const supported = FindBuildInfo(_build) != nullptr;
+        if (_patchPolicy.ShouldPatch(_build, supported))
+        {
+            return OfferPatch();
+        }
+        if (!supported)
+        {
+            SendInvalidVersion();
+            return true;
+        }
 
         ///- Update the sessionkey, last_ip, last login time and reset number of failed logins in the account table for this account
         // No SQL injection (escaped user name and OS) and IP address as received by socket
@@ -1391,7 +1350,7 @@ bool AuthSocket::_HandleXferCancel()
 
 bool AuthSocket::BeginPatchStream(uint64 startOffset)
 {
-    if (_patchPath.empty())
+    if (!m_patchArtifact)
     {
         close_connection();
         return false;
@@ -1401,12 +1360,72 @@ bool AuthSocket::BeginPatchStream(uint64 startOffset)
     // stream is under way (the background thread now owns the send channel).
     _status = STATUS_CLOSED;
 
-    if (!StartPatchTransfer(m_sender, m_closer, m_flowControl, _patchPath, startOffset))
+    if (!StartPatchTransfer(
+        m_sender,
+        m_closer,
+        m_flowControl,
+        std::move(m_patchArtifact),
+        startOffset))
     {
-        sLog.outError("[Patch] failed to open %s for transfer", _patchPath.c_str());
+        sLog.outError(
+            "[Patch] rejected transfer offset %llu for build %u locale %s",
+            static_cast<unsigned long long>(startOffset),
+            _build,
+            _localizationName.c_str());
         close_connection();
         return false;
     }
 
     return true;
+}
+
+bool AuthSocket::OfferPatch()
+{
+    std::string const patchFile =
+        "./patches/" + std::to_string(_build) + _localizationName + ".mpq";
+    std::unique_ptr<PatchArtifact> artifact = PatchArtifact::Open(patchFile);
+    if (!artifact)
+    {
+        sLog.outError("[Patch] required archive cannot be opened: %s",
+            patchFile.c_str());
+        SendInvalidVersion();
+        return true;
+    }
+
+    XFER_INIT transfer{};
+    transfer.cmd = CMD_XFER_INITIATE;
+    transfer.fileNameLen = 5;
+    memcpy(transfer.fileName, "Patch", 5);
+    transfer.file_size = artifact->size();
+    memcpy(
+        transfer.md5,
+        artifact->digest().data(),
+        artifact->digest().size());
+
+    m_patchArtifact = std::move(artifact);
+
+    uint8 data[2] = { CMD_AUTH_LOGON_PROOF, WOW_FAIL_VERSION_UPDATE };
+    send(reinterpret_cast<char const*>(data), sizeof(data));
+    send(reinterpret_cast<char const*>(&transfer), sizeof(transfer));
+
+    _status = STATUS_PATCH;
+    deactivate_auth_deadline();
+    DEBUG_LOG(
+        "[AuthChallenge] offering patch %s (%llu bytes) to build %u",
+        patchFile.c_str(),
+        static_cast<unsigned long long>(transfer.file_size),
+        _build);
+    return true;
+}
+
+void AuthSocket::SendInvalidVersion()
+{
+    ByteBuffer packet;
+    packet << static_cast<uint8>(CMD_AUTH_LOGON_CHALLENGE);
+    packet << static_cast<uint8>(0x00);
+    packet << static_cast<uint8>(WOW_FAIL_VERSION_INVALID);
+    DEBUG_LOG("[AuthChallenge] %u is not a valid client version!", _build);
+    send(
+        reinterpret_cast<char const*>(packet.contents()),
+        packet.size());
 }

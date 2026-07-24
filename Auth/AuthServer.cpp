@@ -47,6 +47,7 @@ struct AuthServer::Impl
     std::mutex socketsMutex;
     std::vector<std::weak_ptr<AuthSocket>> sockets;
     std::chrono::seconds authTimeout{30};
+    PatchPolicy patchPolicy;
 };
 
 AuthServer::AuthServer()
@@ -62,15 +63,18 @@ AuthServer::~AuthServer()
 bool AuthServer::Start(
     uint16_t port,
     const std::string& bindIp,
-    std::chrono::seconds authTimeout)
+    std::chrono::seconds authTimeout,
+    PatchPolicy patchPolicy)
 {
     m_impl->authTimeout = authTimeout;
+    m_impl->patchPolicy = std::move(patchPolicy);
     Impl* const impl = m_impl.get();
 
     return m_impl->server.start(port, [impl]() -> std::shared_ptr<net::ISession>
     {
         std::shared_ptr<AuthSocket> socket =
-            std::make_shared<AuthSocket>(impl->authTimeout);
+            std::make_shared<AuthSocket>(
+                impl->authTimeout, impl->patchPolicy);
         {
             std::lock_guard<std::mutex> lock(impl->socketsMutex);
             impl->sockets.emplace_back(socket);
