@@ -87,7 +87,17 @@ if(WIN32 AND MSVC)
         )
 endif()
 
-if(BUILD_TESTING)
+# Gated on WITH_TESTS: the project's single global test switch, declared at the
+# top level as option(WITH_TESTS "Build the unit tests" OFF). Tests are built
+# only when they are explicitly asked for, and an undefined WITH_TESTS evaluates
+# false, so the default is off either way.
+#
+# Deliberately NOT the CMake-standard BUILD_TESTING: include(CTest) defines that
+# as ON by default, so any dependency pulling CTest in would silently start
+# building tests project-wide. WITH_TESTS is also what gates enable_testing() at
+# the root, so gating on anything else leaves every add_test() below a no-op and
+# ctest reports "No tests were found".
+if(WITH_TESTS)
     add_executable(realmd_auth_protocol_tests
         Tests/AuthProtocolGuardTests.cpp
         Auth/AuthProtocolGuard.cpp
@@ -134,23 +144,62 @@ if(BUILD_TESTING)
         mangos_openssl_strict
     )
     if(WIN32)
-        find_file(REALMD_TEST_OPENSSL_CRYPTO_DLL
-            NAMES libcrypto-3-x64.dll libcrypto-3.dll
-            HINTS "${OPENSSL_ROOT_DIR}/bin"
-            NO_DEFAULT_PATH
-        )
-        if(NOT REALMD_TEST_OPENSSL_CRYPTO_DLL)
-            message(FATAL_ERROR
-                "Could not find the OpenSSL 3.x crypto runtime DLL under "
-                "${OPENSSL_ROOT_DIR}/bin")
+        # Co-locate the OpenSSL crypto runtime next to the test executable.
+        #
+        # OPENSSL_ROOT_DIR alone is not a usable anchor: FindOpenSSL routinely
+        # resolves via OPENSSL_INCLUDE_DIR / the library paths without it ever
+        # being set, in which case "${OPENSSL_ROOT_DIR}/bin" degrades to "/bin".
+        # Installs also disagree on whether the DLLs sit in <prefix>/bin or
+        # directly in <prefix>. So derive candidate directories from whatever the
+        # OpenSSL discovery actually produced, and search all of them.
+        set(_realmd_openssl_hints)
+        if(OPENSSL_ROOT_DIR)
+            list(APPEND _realmd_openssl_hints
+                "${OPENSSL_ROOT_DIR}" "${OPENSSL_ROOT_DIR}/bin")
         endif()
-        add_custom_command(TARGET realmd_patch_safety_tests POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${REALMD_TEST_OPENSSL_CRYPTO_DLL}"
-                "$<TARGET_FILE_DIR:realmd_patch_safety_tests>"
-            COMMENT
-                "realmd_patch_safety_tests: co-locating the OpenSSL runtime"
+        if(OPENSSL_INCLUDE_DIR)
+            get_filename_component(_realmd_openssl_prefix
+                "${OPENSSL_INCLUDE_DIR}" DIRECTORY)
+            list(APPEND _realmd_openssl_hints
+                "${_realmd_openssl_prefix}" "${_realmd_openssl_prefix}/bin")
+        endif()
+        foreach(_realmd_openssl_lib IN ITEMS
+                ${OPENSSL_CRYPTO_LIBRARY} ${LIB_EAY_RELEASE} ${LIB_EAY})
+            if(_realmd_openssl_lib)
+                get_filename_component(_realmd_openssl_libdir
+                    "${_realmd_openssl_lib}" DIRECTORY)
+                list(APPEND _realmd_openssl_hints
+                    "${_realmd_openssl_libdir}" "${_realmd_openssl_libdir}/../bin")
+            endif()
+        endforeach()
+
+        # The runtime name carries the major version (libcrypto-3-x64.dll on
+        # OpenSSL 3, libcrypto-4-x64.dll on OpenSSL 4), so match the family
+        # rather than pinning one major.
+        find_file(REALMD_TEST_OPENSSL_CRYPTO_DLL
+            NAMES
+                libcrypto-4-x64.dll libcrypto-4.dll
+                libcrypto-3-x64.dll libcrypto-3.dll
+                libcrypto-x64.dll   libcrypto.dll
+            HINTS ${_realmd_openssl_hints}
         )
+
+        # A missing test-only runtime must not break configuring the server: warn
+        # and let the test fall back to whatever is on PATH.
+        if(REALMD_TEST_OPENSSL_CRYPTO_DLL)
+            add_custom_command(TARGET realmd_patch_safety_tests POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${REALMD_TEST_OPENSSL_CRYPTO_DLL}"
+                    "$<TARGET_FILE_DIR:realmd_patch_safety_tests>"
+                COMMENT
+                    "realmd_patch_safety_tests: co-locating the OpenSSL runtime"
+            )
+        else()
+            message(WARNING
+                "OpenSSL crypto runtime DLL not found; realmd_patch_safety_tests "
+                "will rely on it being on PATH. Set OPENSSL_ROOT_DIR to have it "
+                "copied next to the test executable.")
+        endif()
     endif()
     add_test(NAME realmd_patch_safety_tests COMMAND realmd_patch_safety_tests)
 
