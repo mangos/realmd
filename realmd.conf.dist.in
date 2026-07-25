@@ -41,6 +41,23 @@ ConfVersion=@MANGOS_REALM_VER@
 #        Default: 30
 #                 0 (Disabled)
 #
+#    Patch.Enable
+#        Allow realmd to offer build+locale MPQ upgrades to unsupported builds
+#        and builds selected by Patch.ForceBuilds.
+#        Default: 1
+#
+#    Patch.ForceBuilds
+#        Exact accepted source builds that must consume a staged upgrade before
+#        login. Whitespace-separated. Empty preserves normal accepted-build
+#        login.
+#        Stage each archive as ./patches/<build><locale>.mpq, for example
+#        ./patches/5875enUS.mpq. Build the complete publisher-signed MPQ outside
+#        that path and replace it atomically before offering it. Existing
+#        transfers retain the exact open artifact that was advertised.
+#        This mechanism upgrades client builds; it does not push same-build
+#        content updates.
+#        Default: ""
+#
 #    BindIP
 #        Bind realm list demon to IP/hostname
 #        DO NOT CHANGE THIS UNLESS YOU _REALLY_ KNOW WHAT YOU'RE DOING
@@ -137,6 +154,8 @@ PidFile                = ""
 MaxPingTime            = 30
 RealmServerPort        = 3724
 AuthSessionTimeout     = 30
+Patch.Enable           = 1
+Patch.ForceBuilds      = ""
 BindIP                 = "0.0.0.0"
 
 LogLevel               = 0

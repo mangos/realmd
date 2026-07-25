@@ -29,6 +29,8 @@
 #ifndef MANGOS_H_AUTHSERVER
 #define MANGOS_H_AUTHSERVER
 
+#include "PatchPolicy.h"
+
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -56,7 +58,8 @@ class AuthServer
         bool Start(
             uint16_t port,
             const std::string& bindIp = std::string(),
-            std::chrono::seconds authTimeout = std::chrono::seconds(30));
+            std::chrono::seconds authTimeout = std::chrono::seconds(30),
+            PatchPolicy patchPolicy = PatchPolicy());
 
         /// Expire sockets that have not completed authentication in time.
         void Update();

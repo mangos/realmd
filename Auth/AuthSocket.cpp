@@ -55,15 +55,15 @@
 #include "AuthSocket.h"
 #include "AuthCodes.h"
 #include "AuthProtocolGuard.h"
+#include "PatchArtifact.h"
 #include "PatchHandler.h"
 
 #include <openssl/md5.h>
 
 #include <chrono>
 #include <cstring>
-#include <fstream>
 #include <string>
-#include <thread>
+#include <utility>
 
 extern DatabaseType LoginDatabase;
 
@@ -178,9 +178,11 @@ static_assert(
     "reconnect proof wire layout changed");
 
 /// Constructor - set the N and g values for SRP6
-AuthSocket::AuthSocket(std::chrono::seconds authTimeout)
+AuthSocket::AuthSocket(
+    std::chrono::seconds authTimeout, PatchPolicy patchPolicy)
     : _status(STATUS_CHALLENGE),
       m_authDeadline(MaNGOS::Auth::Deadline::Clock::now(), authTimeout),
+      _patchPolicy(std::move(patchPolicy)),
       _build(0),
       _accountSecurityLevel(SEC_PLAYER)
 {
@@ -747,60 +749,6 @@ bool AuthSocket::_HandleLogonProof()
 
     _status = STATUS_CLOSED;
 
-    ///- Check if the client has one of the expected version numbers
-    bool valid_version = FindBuildInfo(_build) != NULL;
-
-    /// <ul><li> If the client has no valid version, offer a patch archive if one
-    /// matching this build+locale is present under ./patches; otherwise reject it.
-    if (!valid_version)
-    {
-        // Archive name mirrors the classic downloader: "<build><locale>.mpq"
-        // (e.g. "5875enGB.mpq"). Kept relative to the working directory as before.
-        std::string patchFile = "./patches/" + std::to_string(_build) + _localizationName + ".mpq";
-
-        uint64 fileSize = 0;
-        {
-            std::ifstream patch(patchFile, std::ios::binary | std::ios::ate);
-            if (patch)
-            {
-                fileSize = uint64(patch.tellg());
-            }
-        }
-
-        XFER_INIT xferh;
-        if (fileSize > 0 && PatchCache::instance()->GetMD5(patchFile, xferh.md5))
-        {
-            xferh.cmd         = CMD_XFER_INITIATE;
-            xferh.fileNameLen = 5;
-            memcpy(xferh.fileName, "Patch", 5);
-            xferh.file_size   = fileSize;
-
-            _patchPath = patchFile;
-
-            ///- Tell the client an update is available, then describe the transfer.
-            uint8 data[2] = { CMD_AUTH_LOGON_PROOF, WOW_FAIL_VERSION_UPDATE };
-            send((const char*)data, sizeof(data));
-            send((const char*)&xferh, sizeof(xferh));
-
-            ///- Wait for the client's XFER accept/resume/cancel.
-            _status = STATUS_PATCH;
-            deactivate_auth_deadline();
-            DEBUG_LOG("[AuthChallenge] offering patch %s (%llu bytes) to build %u",
-                      patchFile.c_str(), (unsigned long long)fileSize, _build);
-            return true;
-        }
-
-        ByteBuffer pkt;
-        pkt << (uint8) CMD_AUTH_LOGON_CHALLENGE;
-        pkt << (uint8) 0x00;
-        pkt << (uint8) WOW_FAIL_VERSION_INVALID;
-        DEBUG_LOG("[AuthChallenge] %u is not a valid client version!", _build);
-        DEBUG_LOG("[AuthChallenge] Patch %s not found", patchFile.c_str());
-        send((char const*)pkt.contents(), pkt.size());
-        return true;
-    }
-    /// </ul>
-
     ///- Continue the SRP6 calculation based on data received from the client
     BigNumber A;
 
@@ -882,43 +830,41 @@ bool AuthSocket::_HandleLogonProof()
     {
         BASIC_LOG("User '%s' successfully authenticated", _login.c_str());
 
+        bool const supported = FindBuildInfo(_build) != nullptr;
+        if (_patchPolicy.ShouldPatch(_build, supported))
+        {
+            return OfferPatch();
+        }
+        if (!supported)
+        {
+            SendInvalidVersion();
+            return true;
+        }
+
         ///- Update the sessionkey, last_ip, last login time and reset number of failed logins in the account table for this account
         // No SQL injection (escaped user name and OS) and IP address as received by socket
         const char* K_hex = K.AsHexStr();
 
-        // Use synchronous write to help ensure mangosd gets the correct key
         LoginDatabase.escape_string(_os);
-        LoginDatabase.Execute("START TRANSACTION");
-        char updateQuery[512];
-        snprintf(updateQuery, sizeof(updateQuery),
-                "UPDATE `account` SET `sessionkey` = '%s', `last_ip` = '%s', `last_login` = NOW(), `locale` = '%u', `os` = '%s', `failed_logins` = 0 WHERE `username` = '%s'",
-            K_hex, get_remote_address().c_str(), GetLocaleByName(_localizationName), _os.c_str(), _safelogin.c_str());
-        LoginDatabase.Execute(updateQuery);
-        LoginDatabase.Execute("COMMIT");
-        LoginDatabase.Execute("FLUSH TABLES");
-
-        // Verify the new key is available for reads before mangosd tries, gets the old key, and fails
-        bool keyVerified = false;
-        for (int attempts = 0; attempts < 1000 && !keyVerified; attempts++)
+        if (!LoginDatabase.DirectPExecute(
+            "UPDATE `account` SET `sessionkey` = '%s', `last_ip` = '%s', "
+            "`last_login` = NOW(), `locale` = '%u', `os` = '%s', "
+            "`failed_logins` = 0 WHERE `username` = '%s'",
+            K_hex,
+            get_remote_address().c_str(),
+            GetLocaleByName(_localizationName),
+            _os.c_str(),
+            _safelogin.c_str()))
         {
-            QueryResult* verify = LoginDatabase.PQuery("SELECT `sessionkey` FROM `account` WHERE `username` = '%s'", _safelogin.c_str());
-            if (verify)
-            {
-                Field* vf = verify->Fetch();
-                const char *sessionkey = vf->GetString();
-                if (sessionkey && K_hex && strcmp(sessionkey, K_hex) == 0)
-                {
-                    keyVerified = true;
-                }
-                delete verify;
-            }
-            if (!keyVerified)
-            {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
+            sLog.outError(
+                "[Auth] Failed to publish session key for account %s",
+                _login.c_str());
+            OPENSSL_free(const_cast<char*>(K_hex));
+            close_connection();
+            return false;
         }
-        // Write of new key should be verified, so allow the client to proceed to mangosd
-        OPENSSL_free((void*)K_hex);
+
+        OPENSSL_free(const_cast<char*>(K_hex));
 
         ///- Finish SRP6 and send the final result to the client
         sha.Initialize();
@@ -1211,9 +1157,8 @@ bool AuthSocket::_HandleRealmList()
 
 void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
 {
-    RealmList::RealmListIterators iters;
-    iters = sRealmList.GetIteratorsForBuild(_build);
-    uint32 numRealms = sRealmList.NumRealmsForBuild(_build);
+    RealmListView const realms = sRealmList.GetRealmsForBuild(_build);
+    uint32 const numRealms = static_cast<uint32>(realms.size());
 
     uint32 clientIp = ParseClientIPv4(remote_address_);
 
@@ -1226,12 +1171,12 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
             pkt << uint32(0);                               // unused value
             pkt << uint8(numRealms);
 
-            for (RealmList::RealmStlList::const_iterator itr = iters.first; itr != iters.second; ++itr)
+            for (Realm const* realm : realms)
             {
                 uint8 AmountOfCharacters;
 
                 // No SQL injection. id of realm is controlled by the database.
-                QueryResult* result = LoginDatabase.PQuery("SELECT `numchars` FROM `realmcharacters` WHERE `realmid` = '%d' AND `acctid`='%u'", (*itr)->m_ID, acctid);
+                QueryResult* result = LoginDatabase.PQuery("SELECT `numchars` FROM `realmcharacters` WHERE `realmid` = '%d' AND `acctid`='%u'", realm->m_ID, acctid);
                 if (result)
                 {
                     Field* fields = result->Fetch();
@@ -1243,18 +1188,18 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
                     AmountOfCharacters = 0;
                 }
 
-                bool ok_build = std::find((*itr)->realmbuilds.begin(), (*itr)->realmbuilds.end(), _build) != (*itr)->realmbuilds.end();
+                bool ok_build = std::find(realm->realmbuilds.begin(), realm->realmbuilds.end(), _build) != realm->realmbuilds.end();
 
                 RealmBuildInfo const* buildInfo = ok_build ? FindBuildInfo(_build) : NULL;
                 if (!buildInfo)
                 {
-                    buildInfo = &(*itr)->realmBuildInfo;
+                    buildInfo = &realm->realmBuildInfo;
                 }
 
-                RealmFlags realmflags = (*itr)->realmflags;
+                RealmFlags realmflags = realm->realmflags;
 
                 // 1.x clients not support explicitly REALM_FLAG_SPECIFYBUILD, so manually form similar name as show in more recent clients
-                std::string name = (*itr)->name;
+                std::string name = realm->name;
                 if (realmflags & REALM_FLAG_SPECIFYBUILD)
                 {
                     char buf[20];
@@ -1263,21 +1208,21 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
                 }
 
                 // Show offline state for unsupported client builds and locked realms (1.x clients not support locked state show)
-                if (!ok_build || ((*itr)->allowedSecurityLevel > _accountSecurityLevel))
+                if (!ok_build || (realm->allowedSecurityLevel > _accountSecurityLevel))
                 {
                     realmflags = RealmFlags(realmflags | REALM_FLAG_OFFLINE);
                 }
 
-                pkt << uint32((*itr)->icon);                                        // realm type
+                pkt << uint32(realm->icon);                                        // realm type
                 pkt << uint8(realmflags);                                           // realmflags
                 pkt << name;                                                        // name
                 {
-                    RealmAddress srvAddr = GetAddressForClient((**itr), clientIp);
-                    pkt << GetAddressString(srvAddr.ip, (*itr)->ExternalAddress.port);  // address
+                    RealmAddress srvAddr = GetAddressForClient(*realm, clientIp);
+                    pkt << GetAddressString(srvAddr.ip, realm->ExternalAddress.port);  // address
                 }
-                pkt << float((*itr)->populationLevel);
+                pkt << float(realm->populationLevel);
                 pkt << uint8(AmountOfCharacters);
-                pkt << uint8((*itr)->timezone);                                     // realm category
+                pkt << uint8(realm->timezone);                                     // realm category
                 pkt << uint8(0x00);                                                 // unk, may be realm number/id?
             }
 
@@ -1300,12 +1245,12 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
             pkt << uint32(0);                               // unused value
             pkt << tempRealm;
 
-            for (RealmList::RealmStlList::const_iterator itr = iters.first; itr != iters.second; ++itr)
+            for (Realm const* realm : realms)
             {
                 uint8 AmountOfCharacters;
 
                 // No SQL injection. id of realm is controlled by the database.
-                QueryResult* result = LoginDatabase.PQuery("SELECT `numchars` FROM `realmcharacters` WHERE `realmid` = '%d' AND `acctid`='%u'", (*itr)->m_ID, acctid);
+                QueryResult* result = LoginDatabase.PQuery("SELECT `numchars` FROM `realmcharacters` WHERE `realmid` = '%d' AND `acctid`='%u'", realm->m_ID, acctid);
                 if (result)
                 {
                     Field* fields = result->Fetch();
@@ -1317,17 +1262,17 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
                     AmountOfCharacters = 0;
                 }
 
-                bool ok_build = std::find((*itr)->realmbuilds.begin(), (*itr)->realmbuilds.end(), _build) != (*itr)->realmbuilds.end();
+                bool ok_build = std::find(realm->realmbuilds.begin(), realm->realmbuilds.end(), _build) != realm->realmbuilds.end();
 
                 RealmBuildInfo const* buildInfo = ok_build ? FindBuildInfo(_build) : NULL;
                 if (!buildInfo)
                 {
-                    buildInfo = &(*itr)->realmBuildInfo;
+                    buildInfo = &realm->realmBuildInfo;
                 }
 
-                uint8 lock = ((*itr)->allowedSecurityLevel > _accountSecurityLevel) ? 1 : 0;
+                uint8 lock = (realm->allowedSecurityLevel > _accountSecurityLevel) ? 1 : 0;
 
-                RealmFlags realmFlags = (*itr)->realmflags;
+                RealmFlags realmFlags = realm->realmflags;
 
                 // Show offline state for unsupported client builds
                 if (!ok_build)
@@ -1340,17 +1285,17 @@ void AuthSocket::LoadRealmlist(ByteBuffer& pkt, uint32 acctid)
                     realmFlags = RealmFlags(realmFlags & ~REALM_FLAG_SPECIFYBUILD);
                 }
 
-                pkt << uint8((*itr)->icon);                                         // realm type (this is second column in Cfg_Configs.dbc)
+                pkt << uint8(realm->icon);                                         // realm type (this is second column in Cfg_Configs.dbc)
                 pkt << uint8(lock);                                                 // flags, if 0x01, then realm locked
                 pkt << uint8(realmFlags);                                           // see enum RealmFlags
-                pkt << (*itr)->name;                                                // name
+                pkt << realm->name;                                                // name
                 {
-                    RealmAddress srvAddr = GetAddressForClient((**itr), clientIp);
-                    pkt << GetAddressString(srvAddr.ip, (*itr)->ExternalAddress.port);  // address
+                    RealmAddress srvAddr = GetAddressForClient(*realm, clientIp);
+                    pkt << GetAddressString(srvAddr.ip, realm->ExternalAddress.port);  // address
                 }
-                pkt << float((*itr)->populationLevel);
+                pkt << float(realm->populationLevel);
                 pkt << uint8(AmountOfCharacters);
-                pkt << uint8((*itr)->timezone);                                     // realm category (Cfg_Categories.dbc)
+                pkt << uint8(realm->timezone);                                     // realm category (Cfg_Categories.dbc)
                 pkt << uint8(0x2C);                                                 // unk, may be realm number/id?
 
                 if (realmFlags & REALM_FLAG_SPECIFYBUILD)
@@ -1405,7 +1350,7 @@ bool AuthSocket::_HandleXferCancel()
 
 bool AuthSocket::BeginPatchStream(uint64 startOffset)
 {
-    if (_patchPath.empty())
+    if (!m_patchArtifact)
     {
         close_connection();
         return false;
@@ -1415,12 +1360,72 @@ bool AuthSocket::BeginPatchStream(uint64 startOffset)
     // stream is under way (the background thread now owns the send channel).
     _status = STATUS_CLOSED;
 
-    if (!StartPatchTransfer(m_sender, m_closer, m_flowControl, _patchPath, startOffset))
+    if (!StartPatchTransfer(
+        m_sender,
+        m_closer,
+        m_flowControl,
+        std::move(m_patchArtifact),
+        startOffset))
     {
-        sLog.outError("[Patch] failed to open %s for transfer", _patchPath.c_str());
+        sLog.outError(
+            "[Patch] rejected transfer offset %llu for build %u locale %s",
+            static_cast<unsigned long long>(startOffset),
+            _build,
+            _localizationName.c_str());
         close_connection();
         return false;
     }
 
     return true;
+}
+
+bool AuthSocket::OfferPatch()
+{
+    std::string const patchFile =
+        "./patches/" + std::to_string(_build) + _localizationName + ".mpq";
+    std::unique_ptr<PatchArtifact> artifact = PatchArtifact::Open(patchFile);
+    if (!artifact)
+    {
+        sLog.outError("[Patch] required archive cannot be opened: %s",
+            patchFile.c_str());
+        SendInvalidVersion();
+        return true;
+    }
+
+    XFER_INIT transfer{};
+    transfer.cmd = CMD_XFER_INITIATE;
+    transfer.fileNameLen = 5;
+    memcpy(transfer.fileName, "Patch", 5);
+    transfer.file_size = artifact->size();
+    memcpy(
+        transfer.md5,
+        artifact->digest().data(),
+        artifact->digest().size());
+
+    m_patchArtifact = std::move(artifact);
+
+    uint8 data[2] = { CMD_AUTH_LOGON_PROOF, WOW_FAIL_VERSION_UPDATE };
+    send(reinterpret_cast<char const*>(data), sizeof(data));
+    send(reinterpret_cast<char const*>(&transfer), sizeof(transfer));
+
+    _status = STATUS_PATCH;
+    deactivate_auth_deadline();
+    DEBUG_LOG(
+        "[AuthChallenge] offering patch %s (%llu bytes) to build %u",
+        patchFile.c_str(),
+        static_cast<unsigned long long>(transfer.file_size),
+        _build);
+    return true;
+}
+
+void AuthSocket::SendInvalidVersion()
+{
+    ByteBuffer packet;
+    packet << static_cast<uint8>(CMD_AUTH_LOGON_CHALLENGE);
+    packet << static_cast<uint8>(0x00);
+    packet << static_cast<uint8>(WOW_FAIL_VERSION_INVALID);
+    DEBUG_LOG("[AuthChallenge] %u is not a valid client version!", _build);
+    send(
+        reinterpret_cast<char const*>(packet.contents()),
+        packet.size());
 }

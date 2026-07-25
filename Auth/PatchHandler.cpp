@@ -26,19 +26,14 @@
  \ingroup realmd
  */
 
-#include <cstdint>
-#include <string>
-#include <memory>
-#include <mutex>
 #include "PatchHandler.h"
+#include "PatchArtifact.h"
 #include "AuthCodes.h"
 #include "Log.h"
 
-#include <openssl/evp.h>
-
 #include <chrono>
-#include <cstring>
-#include <fstream>
+#include <cstdint>
+#include <memory>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -57,102 +52,22 @@ namespace
     constexpr uint64_t kMaxOutstandingBytes = 256 * 1024;
 }
 
-PatchCache* PatchCache::instance()
-{
-    static PatchCache s_instance;
-    return &s_instance;
-}
-
-bool PatchCache::ComputeMD5(const std::string& fullPath, uint8_t outMd5[MD5_DIGEST_LENGTH])
-{
-    std::ifstream in(fullPath, std::ios::binary);
-    if (!in)
-    {
-        return false;
-    }
-
-    // Streamed, so a large patch is never held in memory: the one-shot EVP_Digest()
-    // cannot express that, hence the explicit context.
-    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
-    if (!ctx)
-    {
-        return false;
-    }
-
-    if (EVP_DigestInit_ex(ctx, EVP_md5(), NULL) != 1)
-    {
-        EVP_MD_CTX_free(ctx);
-        return false;
-    }
-
-    char buf[kChunkSize];
-    while (in)
-    {
-        in.read(buf, sizeof(buf));
-        std::streamsize got = in.gcount();
-        if (got > 0 && EVP_DigestUpdate(ctx, buf, static_cast<size_t>(got)) != 1)
-        {
-            EVP_MD_CTX_free(ctx);
-            return false;
-        }
-    }
-
-    // A read error (as opposed to a clean EOF) leaves a partial hash — reject it.
-    if (in.bad())
-    {
-        EVP_MD_CTX_free(ctx);
-        return false;
-    }
-
-    unsigned int len = 0;
-    const bool ok = EVP_DigestFinal_ex(ctx, outMd5, &len) == 1;
-    EVP_MD_CTX_free(ctx);
-    return ok;
-}
-
-bool PatchCache::GetMD5(const std::string& fullPath, uint8_t outMd5[MD5_DIGEST_LENGTH])
-{
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    auto it = m_cache.find(fullPath);
-    if (it != m_cache.end())
-    {
-        memcpy(outMd5, it->second.data(), MD5_DIGEST_LENGTH);
-        return true;
-    }
-
-    std::array<uint8_t, MD5_DIGEST_LENGTH> digest{};
-    if (!ComputeMD5(fullPath, digest.data()))
-    {
-        return false;
-    }
-
-    m_cache[fullPath] = digest;
-    memcpy(outMd5, digest.data(), MD5_DIGEST_LENGTH);
-    return true;
-}
-
 bool StartPatchTransfer(net::Sender sender, net::Closer closer,
                         std::shared_ptr<net::FlowControl> flow,
-                        const std::string& path, uint64_t startOffset)
+                        std::unique_ptr<PatchArtifact> artifact,
+                        std::uint64_t startOffset)
 {
-    // Open (and position) up front so a failure is reported synchronously to the
-    // caller instead of on the background thread.
-    auto in = std::make_shared<std::ifstream>(path, std::ios::binary);
-    if (!in->is_open())
+    if (!artifact || startOffset > artifact->size())
     {
         return false;
     }
-    if (startOffset != 0)
+    if (!artifact->Seek(startOffset))
     {
-        in->seekg(static_cast<std::streamoff>(startOffset), std::ios::beg);
-        if (!in->good())
-        {
-            return false;
-        }
+        return false;
     }
 
-    std::thread([in, sender = std::move(sender), closer = std::move(closer),
+    std::thread([artifact = std::move(artifact),
+                 sender = std::move(sender), closer = std::move(closer),
                  flow = std::move(flow)]() mutable
     {
         // The classic downloader dislikes data arriving before it has settled on
@@ -173,8 +88,8 @@ bool StartPatchTransfer(net::Sender sender, net::Closer closer,
                 return;
             }
 
-            in->read(reinterpret_cast<char*>(pkt.data() + 3), kChunkSize);
-            std::streamsize got = in->gcount();
+            std::streamsize const got =
+                artifact->Read(pkt.data() + 3, kChunkSize);
             if (got <= 0)
             {
                 break;
@@ -187,7 +102,7 @@ bool StartPatchTransfer(net::Sender sender, net::Closer closer,
             sender(pkt.data(), 3 + static_cast<size_t>(got));
         }
 
-        if (in->bad())
+        if (artifact->bad())
         {
             sLog.outError("PatchTransfer: read error streaming patch, closing connection");
             closer();
