@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <iostream>
 #include <limits>
+#include <string>
 #include <vector>
 
 namespace
@@ -34,11 +35,16 @@ using MaNGOS::Auth::MaxPendingInput;
 using MaNGOS::Auth::RejectReason;
 using MaNGOS::Auth::StreamState;
 
+constexpr std::size_t ChallengeAccountLengthOffset = 33;
+constexpr std::size_t ChallengeAccountDataOffset = 34;
+constexpr std::size_t ChallengeAccountPrefixBodySize = 30;
+
 std::vector<std::uint8_t> MakeChallenge(std::uint8_t command,
                                         std::uint16_t build,
-                                        std::uint16_t bodySize =
-                                            AuthChallengeMinimumBodySize)
+                                        std::string const& account = "TEST")
 {
+    std::uint16_t const bodySize = static_cast<std::uint16_t>(
+        ChallengeAccountPrefixBodySize + account.size());
     std::vector<std::uint8_t> frame(AuthChallengeHeaderSize + bodySize, 0);
     frame[0] = command;
     frame[2] = static_cast<std::uint8_t>(bodySize & 0xFF);
@@ -49,7 +55,21 @@ std::vector<std::uint8_t> MakeChallenge(std::uint8_t command,
         frame[11] = static_cast<std::uint8_t>(build & 0xFF);
         frame[12] = static_cast<std::uint8_t>(build >> 8);
     }
+    frame[ChallengeAccountLengthOffset] =
+        static_cast<std::uint8_t>(account.size());
+    for (std::size_t i = 0; i < account.size(); ++i)
+    {
+        frame[ChallengeAccountDataOffset + i] =
+            static_cast<std::uint8_t>(account[i]);
+    }
     return frame;
+}
+
+void SetChallengeBodySize(std::vector<std::uint8_t>& frame,
+                          std::uint16_t bodySize)
+{
+    frame[2] = static_cast<std::uint8_t>(bodySize & 0xFF);
+    frame[3] = static_cast<std::uint8_t>(bodySize >> 8);
 }
 
 void CheckChallengeSplits(std::uint8_t command)
@@ -93,6 +113,21 @@ void CheckFixedFrame(StreamState state, std::uint8_t command,
     CHECK(complete.frameSize == required);
 }
 
+void CheckProofFrame(StreamState state, std::uint8_t command,
+                     std::size_t required, std::size_t keyCountOffset)
+{
+    CheckFixedFrame(state, command, required);
+
+    std::vector<std::uint8_t> nonZeroKeyCount(required, 0);
+    nonZeroKeyCount[0] = command;
+    nonZeroKeyCount[keyCountOffset] = 1;
+
+    auto const decision = InspectFrame(
+        state, nonZeroKeyCount.data(), keyCountOffset + 1);
+    CHECK(decision.status == FrameStatus::Reject);
+    CHECK(decision.reason == RejectReason::UnsupportedKeyProof);
+}
+
 void CheckChallengeFraming()
 {
     CheckChallengeSplits(CMD_AUTH_LOGON_CHALLENGE);
@@ -101,21 +136,59 @@ void CheckChallengeFraming()
     for (std::uint16_t body = 0;
          body < AuthChallengeMinimumBodySize; ++body)
     {
-        std::vector<std::uint8_t> const frame =
-            MakeChallenge(CMD_AUTH_LOGON_CHALLENGE, 5875, body);
+        std::vector<std::uint8_t> frame =
+            MakeChallenge(CMD_AUTH_LOGON_CHALLENGE, 5875);
+        SetChallengeBodySize(frame, body);
         auto const decision =
             InspectFrame(StreamState::Challenge, frame.data(), frame.size());
         CHECK(decision.status == FrameStatus::Reject);
         CHECK(decision.reason == RejectReason::MalformedLength);
     }
+
+    std::vector<std::uint8_t> shortBody =
+        MakeChallenge(CMD_AUTH_LOGON_CHALLENGE, 5875);
+    SetChallengeBodySize(
+        shortBody,
+        static_cast<std::uint16_t>(
+            ChallengeAccountPrefixBodySize +
+            shortBody[ChallengeAccountLengthOffset] - 1));
+    auto decision =
+        InspectFrame(StreamState::Challenge, shortBody.data(), shortBody.size());
+    CHECK(decision.status == FrameStatus::Reject);
+    CHECK(decision.reason == RejectReason::MalformedLength);
+
+    std::vector<std::uint8_t> longBody =
+        MakeChallenge(CMD_AUTH_LOGON_CHALLENGE, 5875);
+    std::uint16_t const declaredLongBody = static_cast<std::uint16_t>(
+        ChallengeAccountPrefixBodySize +
+        longBody[ChallengeAccountLengthOffset] + 1);
+    SetChallengeBodySize(longBody, declaredLongBody);
+    longBody.resize(AuthChallengeHeaderSize + declaredLongBody);
+    decision =
+        InspectFrame(StreamState::Challenge, longBody.data(), longBody.size());
+    CHECK(decision.status == FrameStatus::Reject);
+    CHECK(decision.reason == RejectReason::MalformedLength);
+
+    std::vector<std::uint8_t> embeddedNul =
+        MakeChallenge(
+            CMD_AUTH_LOGON_CHALLENGE, 5875, std::string("TE\0ST", 5));
+    decision = InspectFrame(
+        StreamState::Challenge, embeddedNul.data(), embeddedNul.size());
+    CHECK(decision.status == FrameStatus::Reject);
 }
 
 void CheckFixedFraming()
 {
-    CheckFixedFrame(StreamState::LogonProof, CMD_AUTH_LOGON_PROOF,
-                    MaNGOS::Auth::AuthLogonProofSize);
-    CheckFixedFrame(StreamState::ReconnectProof, CMD_AUTH_RECONNECT_PROOF,
-                    MaNGOS::Auth::AuthReconnectProofSize);
+    CheckProofFrame(
+        StreamState::LogonProof,
+        CMD_AUTH_LOGON_PROOF,
+        MaNGOS::Auth::AuthLogonProofSize,
+        73);
+    CheckProofFrame(
+        StreamState::ReconnectProof,
+        CMD_AUTH_RECONNECT_PROOF,
+        MaNGOS::Auth::AuthReconnectProofSize,
+        57);
     CheckFixedFrame(StreamState::Authenticated, CMD_REALM_LIST,
                     MaNGOS::Auth::AuthRealmListSize);
     CheckFixedFrame(StreamState::Patch, CMD_XFER_ACCEPT,

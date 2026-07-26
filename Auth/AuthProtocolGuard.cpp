@@ -27,6 +27,14 @@ bool IsState(StreamState actual, StreamState expected)
 {
     return actual == expected;
 }
+
+constexpr std::size_t ChallengeAccountPrefixBodySize = 30;
+constexpr std::size_t ChallengeAccountLengthOffset =
+    AuthChallengeHeaderSize + ChallengeAccountPrefixBodySize - 1;
+constexpr std::size_t ChallengeAccountDataOffset =
+    ChallengeAccountLengthOffset + 1;
+constexpr std::size_t LogonProofKeyCountOffset = 73;
+constexpr std::size_t ReconnectProofKeyCountOffset = 57;
 }
 
 FrameDecision InspectFrame(
@@ -72,13 +80,46 @@ FrameDecision InspectFrame(
             }
 
             required = AuthChallengeHeaderSize + body;
-            break;
+            if (size < required)
+            {
+                return {FrameStatus::Incomplete, RejectReason::None, required};
+            }
+
+            std::uint8_t const accountLength =
+                data[ChallengeAccountLengthOffset];
+            if (body != ChallengeAccountPrefixBodySize + accountLength)
+            {
+                return Reject(RejectReason::MalformedLength);
+            }
+
+            for (std::size_t i = 0; i < accountLength; ++i)
+            {
+                if (data[ChallengeAccountDataOffset + i] == 0)
+                {
+                    return Reject(RejectReason::MalformedLength);
+                }
+            }
+
+            return {FrameStatus::Complete, RejectReason::None, required};
         }
         case CMD_AUTH_LOGON_PROOF:
         {
             if (!IsState(state, StreamState::LogonProof))
             {
                 return Reject(RejectReason::UnauthorizedCommand);
+            }
+            if (size <= LogonProofKeyCountOffset)
+            {
+                return
+                {
+                    FrameStatus::Incomplete,
+                    RejectReason::None,
+                    LogonProofKeyCountOffset + 1
+                };
+            }
+            if (data[LogonProofKeyCountOffset] != 0)
+            {
+                return Reject(RejectReason::UnsupportedKeyProof);
             }
             required = AuthLogonProofSize;
             break;
@@ -88,6 +129,19 @@ FrameDecision InspectFrame(
             if (!IsState(state, StreamState::ReconnectProof))
             {
                 return Reject(RejectReason::UnauthorizedCommand);
+            }
+            if (size <= ReconnectProofKeyCountOffset)
+            {
+                return
+                {
+                    FrameStatus::Incomplete,
+                    RejectReason::None,
+                    ReconnectProofKeyCountOffset + 1
+                };
+            }
+            if (data[ReconnectProofKeyCountOffset] != 0)
+            {
+                return Reject(RejectReason::UnsupportedKeyProof);
             }
             required = AuthReconnectProofSize;
             break;

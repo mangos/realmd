@@ -558,7 +558,7 @@ bool AuthSocket::_HandleLogonChallenge()
 
     ByteBuffer pkt;
 
-    _login = (const char*)ch->I;
+    _login.assign(reinterpret_cast<char const*>(ch->I), ch->I_len);
     _build = ch->build;
     _os = (const char*)ch->os;
 
@@ -970,7 +970,7 @@ bool AuthSocket::_HandleReconnectChallenge()
     DEBUG_LOG("[ReconnectChallenge] got full packet, %#04x bytes", ch->size);
     DEBUG_LOG("[ReconnectChallenge] name(%d): '%s'", ch->I_len, ch->I);
 
-    _login = (const char*)ch->I;
+    _login.assign(reinterpret_cast<char const*>(ch->I), ch->I_len);
 
     _safelogin = _login;
     LoginDatabase.escape_string(_safelogin);
