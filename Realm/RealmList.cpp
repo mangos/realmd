@@ -43,6 +43,7 @@
 #include "Platform/Define.h"
 #include <cstring>
 #include <string>
+#include "ClientBuildPolicy.h"
 #include "RealmList.h"
 #include "Auth/AuthCodes.h"
 #include "Util.h"                                           // for Tokens typedef
@@ -90,49 +91,6 @@ static RealmAddress ResolveRealmAddress(const std::string& host, uint16 port)
     return result;
 }
 
-// will only support WoW 1.12.1/1.12.2/1.12.3, WoW:TBC 2.4.3, WoW:WotLK 3.3.5a and official release for WoW:Cataclysm and later, client builds 15595, 10505, 8606, 6005, 5875
-// if you need more from old build then add it in cases in realmd sources code
-// list sorted from high to low build and first build used as low bound for accepted by default range (any > it will accepted by realmd at least)
-
-static const RealmBuildInfo ExpectedRealmdClientBuilds[] =
-{
-    // highest supported build, also auto accept all above for simplify future supported builds testing
-    {40000, 9, 0, 0, ' '},  // SHADOWLANDS
-    {35662, 8, 3, 7, ' '},  // BFA
-    {26972, 7, 3, 5, ' '},  // Legion
-    {21742, 6, 2, 4, ' '},  // WOD
-    {18414, 5, 4, 8, ' '},  // MOP
-    {18273, 5, 4, 8, ' '},  // MOP
-    {15595, 4, 3, 4, ' '},  // CATA
-    {12340, 3, 3, 5, 'a'},  // WOTLK
-    {8606,  2, 4, 3, ' '},  // TBC
-    {6141,  1, 12, 3, ' '}, // Vanilla - Chinese
-    {6005,  1, 12, 2, ' '}, // Vanilla - Spanish
-    {5875,  1, 12, 1, ' '}, // Vanilla
-    {0,     0, 0, 0, ' '}                                   // terminator
-};
-
-RealmBuildInfo const* FindBuildInfo(uint16 _build)
-{
-    // first build is low bound of always accepted range
-    if (_build >= ExpectedRealmdClientBuilds[0].build)
-    {
-        return &ExpectedRealmdClientBuilds[0];
-    }
-
-    // continue from 1 with explicit equal check
-    for (int i = 1; ExpectedRealmdClientBuilds[i].build; ++i)
-    {
-        if (_build == ExpectedRealmdClientBuilds[i].build)
-        {
-            return &ExpectedRealmdClientBuilds[i];
-        }
-    }
-
-    // none appropriate build
-    return NULL;
-}
-
 RealmList::RealmList()
 {
 }
@@ -145,15 +103,8 @@ RealmList& sRealmList
 
 RealmVersion RealmList::BelongsToVersion(uint32 build) const
 {
-    RealmBuildVersionMap::const_iterator it;
-    if ((it = m_buildToVersion.find(build)) != m_buildToVersion.end())
-    {
-        return it->second;
-    }
-    else
-    {
-        return REALM_VERSION_VANILLA;
-    }
+    ClientBuildPolicy const* policy = FindClientBuildPolicy(build);
+    return policy ? policy->realmVersion : REALM_VERSION_VANILLA;
 }
 
 RealmListView RealmList::GetRealmsForBuild(uint32 build) const
@@ -164,8 +115,6 @@ RealmListView RealmList::GetRealmsForBuild(uint32 build) const
 /// Load the realm list from the database
 void RealmList::Initialize(uint32 updateInterval)
 {
-    InitBuildToVersion();
-
     ///- Get the content of the realmlist table in the database
     m_snapshots.Publish(BuildSnapshot(true));
     m_refreshGate.Reset(updateInterval, time(NULL));
@@ -177,30 +126,6 @@ void RealmList::AddRealmToBuildList(
     RealmBuilds builds = realm.realmbuilds;
     int buildNumber = *(builds.begin());
     snapshot.realmsByVersion[BelongsToVersion(buildNumber)].push_back(&realm);
-}
-
-void RealmList::InitBuildToVersion()
-{
-    m_buildToVersion[5875] = REALM_VERSION_VANILLA;
-    m_buildToVersion[6005] = REALM_VERSION_VANILLA;
-    m_buildToVersion[6141] = REALM_VERSION_VANILLA;
-
-    m_buildToVersion[8606] = REALM_VERSION_TBC;
-
-    m_buildToVersion[12340] = REALM_VERSION_WOTLK;
-
-    m_buildToVersion[15595] = REALM_VERSION_CATA;
-
-    m_buildToVersion[18273] = REALM_VERSION_MOP;
-    m_buildToVersion[18414] = REALM_VERSION_MOP;
-
-    m_buildToVersion[21742] = REALM_VERSION_WOD;
-
-    m_buildToVersion[26972] = REALM_VERSION_LEGION;
-
-    m_buildToVersion[35662] = REALM_VERSION_BFA;
-
-    m_buildToVersion[40000] = REALM_VERSION_SHADOWLANDS;
 }
 
 void RealmList::UpdateRealm(

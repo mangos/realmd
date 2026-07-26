@@ -33,7 +33,6 @@
 
 #include <memory>
 #include <string>
-#include <map>
 
 /**
  * @brief Storage object for the list of realms on the server
@@ -46,20 +45,12 @@ class RealmList
          * @brief
          *
          */
-        typedef std::map<uint32, RealmVersion> RealmBuildVersionMap;
-
         static RealmList& Instance();
 
         RealmList();
         ~RealmList() {};
 
         void Initialize(uint32 updateInterval);
-
-        /**
-         * Initializes a map holding a link from build number to a version.
-         * \see RealmVersion
-         */
-        void InitVersionToBuild();
 
         void UpdateIfNeed();
 
@@ -79,13 +70,6 @@ class RealmList
          * @return the corresponding version to the given build number
          */
         RealmVersion BelongsToVersion(uint32 build) const;
-
-        /**
-         * Adds entries to a map containing a link from a build number to a certain
-         * wow version, ie: \ref RealmVersion::REALM_VERSION_VANILLA.
-         * \see RealmVersion
-         */
-        void InitBuildToVersion();
 
         /**
          * Adds the given \ref Realm to a list sorted by version, ie: vanilla, tbc etc. This
@@ -121,7 +105,6 @@ class RealmList
     private:
         RealmSnapshotStore m_snapshots;
         RealmRefreshGate m_refreshGate;
-        RealmBuildVersionMap m_buildToVersion;
 };
 
 #define sRealmList RealmList::Instance()

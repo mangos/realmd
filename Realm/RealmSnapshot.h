@@ -57,8 +57,6 @@ enum RealmVersion
     REALM_VERSION_COUNT       = 9
 };
 
-RealmBuildInfo const* FindBuildInfo(uint16 build);
-
 using RealmBuilds = std::set<uint32>;
 
 struct Realm
