@@ -43,7 +43,8 @@ enum class RejectReason
     None,
     UnknownCommand,
     UnauthorizedCommand,
-    MalformedLength
+    MalformedLength,
+    UnsupportedKeyProof
 };
 
 struct FrameDecision
