@@ -117,6 +117,20 @@ if(WITH_TESTS OR BUILD_TESTING)
     )
     add_test(NAME realmd_realm_snapshot_tests COMMAND realmd_realm_snapshot_tests)
 
+    add_executable(realmd_client_build_policy_tests
+        Tests/ClientBuildPolicyTests.cpp
+        Realm/ClientBuildPolicy.cpp
+    )
+    target_compile_features(realmd_client_build_policy_tests PUBLIC cxx_std_17)
+    set_target_properties(realmd_client_build_policy_tests PROPERTIES CXX_EXTENSIONS OFF)
+    target_include_directories(realmd_client_build_policy_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(realmd_client_build_policy_tests PRIVATE
+        shared
+    )
+    add_test(NAME realmd_client_build_policy_tests COMMAND realmd_client_build_policy_tests)
+
     add_test(NAME realmd_auth_safety_policy
         COMMAND ${CMAKE_COMMAND}
             -DREALMD_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}

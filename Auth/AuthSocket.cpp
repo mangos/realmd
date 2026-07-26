@@ -51,6 +51,7 @@
 #include "Database/DatabaseEnv.h"
 #include "Config/Config.h"
 #include "Log.h"
+#include "Realm/ClientBuildPolicy.h"
 #include "Realm/RealmList.h"
 #include "AuthSocket.h"
 #include "AuthCodes.h"
