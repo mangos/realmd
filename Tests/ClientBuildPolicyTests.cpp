@@ -1,3 +1,4 @@
+#include "Auth/AuthResultPolicy.h"
 #include "Realm/ClientBuildPolicy.h"
 
 #include <cstdlib>
@@ -76,12 +77,39 @@ void TestUnknownBuildsAreRejected()
         CHECK(FindBuildInfo(static_cast<uint16>(build)) == nullptr);
     }
 }
+
+void TestLockedAccountResultUsesRuntimeBuildFamily()
+{
+    uint32 const vanilla[] = {5875, 6005, 6141};
+    for (uint32 build : vanilla)
+    {
+        CHECK(LockedAccountResultForBuild(build) == WOW_FAIL_DB_BUSY);
+    }
+
+    uint32 const later[] =
+    {
+        8606, 12340, 15595, 18273, 18414, 21742,
+        26972, 35662, 40000
+    };
+    for (uint32 build : later)
+    {
+        CHECK(LockedAccountResultForBuild(build) ==
+              WOW_FAIL_LOCKED_ENFORCED);
+    }
+
+    uint32 const unknown[] = {0, 39999, 40001, 65535};
+    for (uint32 build : unknown)
+    {
+        CHECK(LockedAccountResultForBuild(build) == WOW_FAIL_DB_BUSY);
+    }
+}
 }
 
 int main()
 {
     TestSupportedBuildsResolveExactly();
     TestUnknownBuildsAreRejected();
+    TestLockedAccountResultUsesRuntimeBuildFamily();
 
     if (failures != 0)
     {

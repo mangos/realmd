@@ -119,6 +119,7 @@ if(WITH_TESTS OR BUILD_TESTING)
 
     add_executable(realmd_client_build_policy_tests
         Tests/ClientBuildPolicyTests.cpp
+        Auth/AuthResultPolicy.cpp
         Realm/ClientBuildPolicy.cpp
     )
     target_compile_features(realmd_client_build_policy_tests PUBLIC cxx_std_17)
