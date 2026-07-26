@@ -87,17 +87,11 @@ if(WIN32 AND MSVC)
         )
 endif()
 
-# Gated on WITH_TESTS: the project's single global test switch, declared at the
-# top level as option(WITH_TESTS "Build the unit tests" OFF). Tests are built
-# only when they are explicitly asked for, and an undefined WITH_TESTS evaluates
-# false, so the default is off either way.
-#
-# Deliberately NOT the CMake-standard BUILD_TESTING: include(CTest) defines that
-# as ON by default, so any dependency pulling CTest in would silently start
-# building tests project-wide. WITH_TESTS is also what gates enable_testing() at
-# the root, so gating on anything else leaves every add_test() below a no-op and
-# ctest reports "No tests were found".
-if(WITH_TESTS)
+# Parent cores use two explicit test switches: WITH_TESTS in MangosTwo and
+# BUILD_TESTING in MangosZero/MangosOne. Both default off in their respective
+# parents, so realmd tests remain opt-in while working with every supported
+# parent convention.
+if(WITH_TESTS OR BUILD_TESTING)
     add_executable(realmd_auth_protocol_tests
         Tests/AuthProtocolGuardTests.cpp
         Auth/AuthProtocolGuard.cpp
