@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <array>
+#include <filesystem>
 #include <limits>
 #include <utility>
 
@@ -36,6 +37,17 @@ PatchArtifact::PatchArtifact(
 
 std::unique_ptr<PatchArtifact> PatchArtifact::Open(std::string const& path)
 {
+    // A DIRECTORY IS NOT A PATCH, and only asking the filesystem says so portably. Opening
+    // one with ifstream SUCCEEDS on FreeBSD and macOS and reports a plausible size, so the
+    // checks below let it through and the client is served a directory as a patch file.
+    // On glibc the same code happens to fail at the first read, which is why this was
+    // invisible until the BSD box ran the test.
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(path, ec) || ec)
+    {
+        return nullptr;
+    }
+
     std::ifstream stream(path, std::ios::binary | std::ios::ate);
     if (!stream.is_open())
     {
