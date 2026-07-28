@@ -12,12 +12,14 @@
 
 #include "PatchArtifact.h"
 
-#include <openssl/evp.h>
+#include "Auth/Md5.h"
 
 #include <algorithm>
 #include <array>
+#include <filesystem>
 #include <limits>
 #include <utility>
+#include <cstring>
 
 namespace
 {
@@ -36,6 +38,17 @@ PatchArtifact::PatchArtifact(
 
 std::unique_ptr<PatchArtifact> PatchArtifact::Open(std::string const& path)
 {
+    // A DIRECTORY IS NOT A PATCH, and only asking the filesystem says so portably. Opening
+    // one with ifstream SUCCEEDS on FreeBSD and macOS and reports a plausible size, so the
+    // checks below let it through and the client is served a directory as a patch file.
+    // On glibc the same code happens to fail at the first read, which is why this was
+    // invisible until the BSD box ran the test.
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(path, ec) || ec)
+    {
+        return nullptr;
+    }
+
     std::ifstream stream(path, std::ios::binary | std::ios::ate);
     if (!stream.is_open())
     {
@@ -63,47 +76,30 @@ std::unique_ptr<PatchArtifact> PatchArtifact::Open(std::string const& path)
         return nullptr;
     }
 
-    EVP_MD_CTX* context = EVP_MD_CTX_new();
-    if (!context)
-    {
-        return nullptr;
-    }
-
-    if (EVP_DigestInit_ex(context, EVP_md5(), nullptr) != 1)
-    {
-        EVP_MD_CTX_free(context);
-        return nullptr;
-    }
+    // Md5Hash owns the context, so the five separate EVP_MD_CTX_free calls this
+    // replaced -- one on every early return -- cannot be forgotten on a sixth.
+    Md5Hash md5;
 
     std::array<char, DigestChunkSize> buffer{};
     while (stream)
     {
         stream.read(buffer.data(), buffer.size());
         std::streamsize const read = stream.gcount();
-        if (read > 0 &&
-            EVP_DigestUpdate(
-                context, buffer.data(), static_cast<std::size_t>(read)) != 1)
+        if (read > 0)
         {
-            EVP_MD_CTX_free(context);
-            return nullptr;
+            md5.UpdateData(reinterpret_cast<std::uint8_t const*>(buffer.data()),
+                           static_cast<std::size_t>(read));
         }
     }
 
     if (stream.bad())
     {
-        EVP_MD_CTX_free(context);
         return nullptr;
     }
 
+    md5.Finalize();
     std::array<std::uint8_t, MD5_DIGEST_LENGTH> digest{};
-    unsigned int digestLength = 0;
-    bool const finalized =
-        EVP_DigestFinal_ex(context, digest.data(), &digestLength) == 1;
-    EVP_MD_CTX_free(context);
-    if (!finalized || digestLength != digest.size())
-    {
-        return nullptr;
-    }
+    std::memcpy(digest.data(), md5.GetDigest(), digest.size());
 
     stream.clear();
     stream.seekg(0, std::ios::beg);
