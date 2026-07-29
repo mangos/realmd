@@ -41,6 +41,7 @@
 #endif
 #include "Common/ServerDefines.h"
 #include "Platform/Define.h"
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include "ClientBuildPolicy.h"
@@ -159,7 +160,7 @@ void RealmList::UpdateRealm(
 
     for (iter = tokens.begin(); iter != tokens.end(); ++iter)
     {
-        uint32 build = atol((*iter).c_str());
+        uint32 build = uint32(std::strtoul((*iter).c_str(), NULL, 10));
         realm.realmbuilds.insert(build);
     }
 
