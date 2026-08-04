@@ -746,8 +746,6 @@ bool AuthSocket::_HandleLogonChallenge()
             pkt << (uint8) WOW_FAIL_UNKNOWN_ACCOUNT;
         }
     }
-    send((char const*)pkt.contents(), pkt.size());
-    return true;
     // Line 537 closed the session up front and only the success path at the end
     // of the account branch reopens it as STATUS_LOGON_PROOF. Anything still
     // closed here is a rejected challenge: banned IP, IP-locked account, banned
@@ -759,6 +757,8 @@ bool AuthSocket::_HandleLogonChallenge()
         m_logonOutcome.Record(MaNGOS::Realmd::LogonOutcome::Rejected);
     }
 
+    send((char const*)pkt.contents(), pkt.size());
+    return true;
 }
 
 /// Logon Proof command handler

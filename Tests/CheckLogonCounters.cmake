@@ -52,3 +52,21 @@ if(STATUS_GATE EQUAL -1)
     "The rejected-challenge outcome must be derived from _status, so every "
     "rejection branch is covered by one test")
 endif()
+
+# Counting occurrences proves the sites EXIST, not that they RUN. A rejection
+# record placed after _HandleLogonChallenge's terminal return compiles, passes a
+# count of seven, and silently drops every banned/locked/unknown-account
+# rejection from the failure totals. That happened once; this stops it.
+string(FIND "${AUTH_SOCKET}"
+  "    if (_status != STATUS_LOGON_PROOF)" REJECT_GUARD)
+string(FIND "${AUTH_SOCKET}"
+  "    send((char const*)pkt.contents(), pkt.size());" CHALLENGE_SEND)
+if(REJECT_GUARD EQUAL -1 OR CHALLENGE_SEND EQUAL -1)
+  message(FATAL_ERROR
+    "The rejected-challenge record and its send() must both be present")
+endif()
+if(CHALLENGE_SEND LESS REJECT_GUARD)
+  message(FATAL_ERROR
+    "The rejected-challenge record must precede the send() and return that end "
+    "_HandleLogonChallenge, or it is unreachable and rejections go uncounted")
+endif()
