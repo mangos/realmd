@@ -314,4 +314,11 @@ if(WITH_TESTS OR BUILD_TESTING)
         shared
     )
     add_test(NAME realmd_login_db_health_tests COMMAND realmd_login_db_health_tests)
+
+
+    add_test(NAME realmd_logon_counter_policy
+        COMMAND ${CMAKE_COMMAND}
+            -DREALMD_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CheckLogonCounters.cmake
+    )
 endif()
