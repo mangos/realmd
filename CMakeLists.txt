@@ -87,10 +87,14 @@ if(WIN32 AND MSVC)
         )
 endif()
 
-# Parent cores use two explicit test switches: WITH_TESTS in MangosTwo and
-# BUILD_TESTING in MangosZero/MangosOne. Both default off in their respective
-# parents, so realmd tests remain opt-in while working with every supported
-# parent convention.
+# All four parents (MangosZero/One/Two/Three) declare option(WITH_TESTS ... OFF)
+# and, when it is on, set BUILD_TESTING and call enable_testing(). So WITH_TESTS
+# is the switch an operator passes and BUILD_TESTING is what the parent derives
+# from it; both are accepted here so this file works either way round.
+#
+# -DBUILD_TESTING=ON alone is NOT a way to run these tests: no parent calls
+# enable_testing() for it, so CTest would have an empty registry and report
+# success having run nothing. Configure with -DWITH_TESTS=ON.
 if(WITH_TESTS OR BUILD_TESTING)
     add_executable(realmd_auth_protocol_tests
         Tests/AuthProtocolGuardTests.cpp
@@ -216,5 +220,11 @@ if(WITH_TESTS OR BUILD_TESTING)
         COMMAND ${CMAKE_COMMAND}
             -DREALMD_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CheckPatchSafety.cmake
+    )
+
+    add_test(NAME realmd_console_config
+        COMMAND ${CMAKE_COMMAND}
+            -DREALMD_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CheckConsoleConfig.cmake
     )
 endif()

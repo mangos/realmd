@@ -95,6 +95,26 @@ ConfVersion=@MANGOS_REALM_VER@
 #        Default: "" - none colors
 #                 "13 7 11 9" - for example :)
 #
+#    Console.Style
+#        Full-screen console: a status header, a scrolling log and a rule, drawn
+#        on the terminal's alternate screen. realmd is observe-only here - it
+#        displays no prompt and reads no commands.
+#        "auto" and "fancy" both ask for it. realmd declines it, and starts no
+#        console threads at all, when stdout or stdin is not a terminal, so
+#        services, pipes and redirected output are unaffected.
+#        A crash leaves the alternate screen and hidden cursor behind, and on
+#        POSIX leaves the terminal with echo and line editing off; run "reset"
+#        to recover.
+#        Default: "auto" (draw it whenever a terminal is present)
+#                 "fancy" (identical to "auto")
+#                 "plain" (never draw it; output exactly as in earlier versions)
+#
+#    Console.Scrollback
+#        Lines of log history the full-screen console keeps. A positive value of
+#        1 to 99 is raised to 100. Zero and negative values are rejected and the
+#        default below is used instead. Ignored when Console.Style is "plain".
+#        Default: 20000
+#
 #    UseProcessors
 #        Used processors mask for multi-processors system (Used only at Windows)
 #        Default: 0 (selected by OS)
@@ -164,6 +184,8 @@ LogFile                = "realm-list.log"
 LogTimestamp           = 0
 LogFileLevel           = 0
 LogColors              = "13 7 11 9"
+Console.Style          = "auto"
+Console.Scrollback     = 20000
 
 UseProcessors          = 0
 ProcessPriority        = 1
