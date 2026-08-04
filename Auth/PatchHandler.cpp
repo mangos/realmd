@@ -28,6 +28,7 @@
 
 #include "PatchHandler.h"
 #include "PatchArtifact.h"
+#include "PatchTransferCounter.h"
 #include "AuthCodes.h"
 #include "Log.h"
 
@@ -66,9 +67,20 @@ bool StartPatchTransfer(net::Sender sender, net::Closer closer,
         return false;
     }
 
+    // Registered from here, on the accepting thread, and with a COPY of the
+    // closer. This function returning true means a transfer is live, so the
+    // registry must already reflect it: a shutdown cancel must never miss an
+    // accepted transfer, and a drain must never see one as idle. Ownership then
+    // moves into the closure, which is what releases it -- the socket is not the
+    // lifetime owner, and if std::thread's constructor throws, the closure is
+    // destroyed and the registration is released with it.
+    auto transferGuard =
+        std::make_unique<MaNGOS::Realmd::PatchTransferGuard>(closer);
+
     std::thread([artifact = std::move(artifact),
                  sender = std::move(sender), closer = std::move(closer),
-                 flow = std::move(flow)]() mutable
+                 flow = std::move(flow),
+                 transferGuard = std::move(transferGuard)]() mutable
     {
         // The classic downloader dislikes data arriving before it has settled on
         // the transfer; a short initial pause mirrors the old PatchHandler.

@@ -24,7 +24,9 @@ foreach(REQUIRED_TEXT
     "std::unique_ptr<PatchArtifact>"
     "startOffset > artifact->size()"
     "PatchArtifact::Open"
-    "_patchArtifact")
+    "_patchArtifact"
+    "std::make_unique<MaNGOS::Realmd::PatchTransferGuard>(closer)"
+    "transferGuard = std::move(transferGuard)")
   string(FIND "${PATCH_SOURCES}" "${REQUIRED_TEXT}" POSITION)
   if(POSITION EQUAL -1)
     message(FATAL_ERROR
@@ -61,4 +63,16 @@ string(FIND "${MAIN_SOURCE}" "Patch.ForceBuilds" FORCE_CONFIG_READ)
 string(FIND "${REALMD_CONFIG}" "Patch.ForceBuilds" FORCE_CONFIG_DOC)
 if(FORCE_CONFIG_READ EQUAL -1 OR FORCE_CONFIG_DOC EQUAL -1)
   message(FATAL_ERROR "Patch.ForceBuilds is not wired and documented")
+endif()
+
+# The transfer must be registered BEFORE the thread that streams it exists.
+# Registering inside the closure leaves a window in which StartPatchTransfer has
+# returned true and the registry is still empty, so a shutdown cancel would miss
+# the connection entirely and the drain would call the daemon idle.
+string(FIND "${PATCH_HANDLER}"
+  "std::make_unique<MaNGOS::Realmd::PatchTransferGuard>(closer)" GUARD_MADE)
+string(FIND "${PATCH_HANDLER}" "std::thread(" TRANSFER_THREAD)
+if(TRANSFER_THREAD EQUAL -1 OR TRANSFER_THREAD LESS GUARD_MADE)
+  message(FATAL_ERROR
+    "The patch transfer guard must be constructed before the streaming thread")
 endif()

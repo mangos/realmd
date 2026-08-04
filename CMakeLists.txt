@@ -227,4 +227,25 @@ if(WITH_TESTS OR BUILD_TESTING)
             -DREALMD_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CheckConsoleConfig.cmake
     )
+
+    # Links no MaNGOS library on purpose. Auth/PatchTransferCounter.{h,cpp}
+    # include only the standard library, and they are kept that way so the
+    # registry never drags Log.h or net/ISession.hpp into a test binary. A test
+    # target that DOES include a src/shared header must link `shared`; this one
+    # simply has no reason to.
+    add_executable(realmd_patch_transfer_counter_tests
+        Tests/PatchTransferCounterTests.cpp
+        Auth/PatchTransferCounter.cpp
+    )
+    target_compile_features(realmd_patch_transfer_counter_tests PUBLIC cxx_std_17)
+    set_target_properties(realmd_patch_transfer_counter_tests
+        PROPERTIES CXX_EXTENSIONS OFF)
+    target_include_directories(realmd_patch_transfer_counter_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(realmd_patch_transfer_counter_tests PRIVATE
+        Threads::Threads
+    )
+    add_test(NAME realmd_patch_transfer_counter_tests
+        COMMAND realmd_patch_transfer_counter_tests)
 endif()
