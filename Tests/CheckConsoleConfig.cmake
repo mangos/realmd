@@ -31,3 +31,32 @@ if(VAL_CONSOLE LESS VAL_LOGCOLORS OR VAL_PROCESSORS LESS VAL_CONSOLE)
   message(FATAL_ERROR
     "The console values must sit in the logging value group, after LogColors")
 endif()
+
+# Documented defaults that contradicted the code, and one annotation that
+# inverted the meaning of a banning control.
+foreach(FORBIDDEN_TEXT
+    "Default: 3  (Never ban)"
+    "Default: 300"
+    "Default: 1 (HIGH)"
+    "Default: \"Realmd.log\""
+    "for example :)")
+  string(FIND "${REALMD_CONFIG}" "${FORBIDDEN_TEXT}" POSITION)
+  if(NOT POSITION EQUAL -1)
+    message(FATAL_ERROR
+      "realmd.conf.dist.in still documents a wrong default: ${FORBIDDEN_TEXT}")
+  endif()
+endforeach()
+
+foreach(REQUIRED_TEXT
+    "Default: 0 (Never ban)"
+    "Default: 600"
+    "Default: 0 (Normal)"
+    "#    DBErrorLogFile"
+    "#    ConfVersion"
+    "DBErrorLogFile         = \"\"")
+  string(FIND "${REALMD_CONFIG}" "${REQUIRED_TEXT}" POSITION)
+  if(POSITION EQUAL -1)
+    message(FATAL_ERROR
+      "realmd.conf.dist.in is missing required text: ${REQUIRED_TEXT}")
+  endif()
+endforeach()

@@ -8,6 +8,14 @@ ConfVersion=@MANGOS_REALM_VER@
 ################################################################################
 # REALMD SETTINGS
 #
+#    ConfVersion
+#        Version stamp of this file, substituted from MANGOS_REALM_VER when the
+#        parent core is configured. realmd compares it with the value it was
+#        compiled against and prints an out-of-date warning when it is lower.
+#        It lives in the [RealmdConf] section at the top of this file. Do not
+#        edit it by hand; take a fresh realmd.conf.dist from your build.
+#        Default: 0 (treated as out of date, so the warning is always shown)
+#
 #    LoginDatabaseInfo
 #    Connection settings for the realm/authentication database
 #        Default: hostname;port;username;password;database
@@ -75,8 +83,8 @@ ConfVersion=@MANGOS_REALM_VER@
 #
 #    LogFile
 #        Logfile name
-#        Default: "Realmd.log"
-#                 "" - empty name disable creating log file
+#        Default: "" - empty name disable creating log file
+#                 "realm-list.log" - the value this file ships with
 #
 #    LogTimestamp
 #        Logfile with timestamp of server start in name
@@ -93,7 +101,13 @@ ConfVersion=@MANGOS_REALM_VER@
 #        Colors: 0 - BLACK, 1 - RED, 2 - GREEN,  3 - BROWN, 4 - BLUE, 5 - MAGENTA, 6 -  CYAN, 7 - GREY,
 #                8 - YELLOW, 9 - LRED, 10 - LGREEN, 11 - LBLUE, 12 - LMAGENTA, 13 - LCYAN, 14 - WHITE
 #        Default: "" - none colors
-#                 "13 7 11 9" - for example :)
+#                 "13 7 11 9" - the value this file ships with
+#
+#    DBErrorLogFile
+#        Name of a file that database errors are appended to, in addition to the
+#        normal log. It is written by the database layer realmd links, so without
+#        it realmd's database errors reach nothing but the console and LogFile.
+#        Default: "" - empty name disable creating log file
 #
 #    Console.Style
 #        Full-screen console: a status header, a scrolling log and a rule, drawn
@@ -121,9 +135,9 @@ ConfVersion=@MANGOS_REALM_VER@
 #                 number (bitmask value of selected processors)
 #
 #    ProcessPriority
-#        Process proirity setting (Used only at Windows)
-#        Default: 1 (HIGH)
-#                 0 (Normal)
+#        Process priority setting (Used only at Windows)
+#        Default: 0 (Normal)
+#                 1 (HIGH) - the value this file ships with
 #
 #    WaitAtStartupError
 #        After startup error report wait <Enter> or some time before continue (and possible close console window)
@@ -154,12 +168,14 @@ ConfVersion=@MANGOS_REALM_VER@
 #        Default: "restart"
 #
 #    WrongPass.MaxCount
-#        Number of login attemps with wrong password before the account or IP is banned
-#        Default: 3  (Never ban)
+#        Number of login attempts with wrong password before the account or IP is banned
+#        Default: 0 (Never ban)
+#                 3 - the value this file ships with
 #
 #    WrongPass.BanTime
 #        Duration of the ban in seconds (0 means permanent ban)
-#        Default: 300
+#        Default: 600
+#                 300 - the value this file ships with
 #
 #    WrongPass.BanType
 #        Ban the IP or account on which login is attempted
@@ -184,6 +200,7 @@ LogFile                = "realm-list.log"
 LogTimestamp           = 0
 LogFileLevel           = 0
 LogColors              = "13 7 11 9"
+DBErrorLogFile         = ""
 Console.Style          = "auto"
 Console.Scrollback     = 20000
 
