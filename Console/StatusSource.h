@@ -33,6 +33,7 @@
 
 #include <ctime>
 #include <string>
+#include "ScheduledExit.h"
 
 namespace MaNGOS::Realmd
 {
@@ -73,11 +74,24 @@ namespace MaNGOS::Realmd
              */
             RealmdStatus Gather(time_t now);
 
+            /**
+             * @brief Publish the loaded weekly exit schedule.
+             *
+             * Main.cpp calls this once, immediately after construction:
+             * LoadScheduledExitConfig() has already run by then (Main.cpp:425)
+             * and realmd never reloads its configuration, so one copy is
+             * enough. Taking a copy keeps the schedule out of a second global
+             * and keeps the countdown itself a pure function.
+             */
+            void SetScheduledExit(
+                MaNGOS::ScheduledExitSchedule const& schedule);
+
         private:
             std::string m_bindIp;
             uint16 m_port;
             bool m_patchEnabled;
             time_t m_startedAt;
+            MaNGOS::ScheduledExitSchedule m_scheduledExit;
             // Phase 4 adds `ChurnWindow m_churn;` here, and nothing else.
     };
 }

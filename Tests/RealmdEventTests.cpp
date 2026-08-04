@@ -22,6 +22,7 @@
  * and lore are copyrighted by Blizzard Entertainment, Inc.
  */
 #include "Events/RealmChangeTracker.h"
+#include "Events/ScheduledExitCountdown.h"
 #include "Events/EventFormat.h"
 #include "Events/DbHealthTracker.h"
 
@@ -42,6 +43,8 @@ using MaNGOS::Realmd::FormatShortDuration;
 using MaNGOS::Realmd::DbHealthTracker;
 using MaNGOS::Realmd::DbProbeState;
 using MaNGOS::Realmd::LoginDbHealth;
+using MaNGOS::Realmd::FormatScheduledExitCountdown;
+using MaNGOS::Realmd::ScheduledExitSecondsRemaining;
 
 namespace
 {
@@ -186,11 +189,75 @@ void TestDbHealthBackwardClockKeepsLastSuccess()
     CHECK(tracker.Observe(MakeHealth(DbProbeState::Ok, 6, 3900), 3900, event));
     CHECK(event == "Login database recovered (probe 6 ms; down for 0s)");
 }
+
+std::tm MakeLocalTime(int wday, int hour, int minute, int second)
+{
+    std::tm localTime = std::tm();
+    localTime.tm_wday = wday;
+    localTime.tm_hour = hour;
+    localTime.tm_min = minute;
+    localTime.tm_sec = second;
+    return localTime;
+}
+
+MaNGOS::ScheduledExitSchedule MakeSchedule(
+    bool enabled, uint32 dayOfWeek, uint32 hour, uint32 minute,
+    MaNGOS::ScheduledExitMode mode)
+{
+    MaNGOS::ScheduledExitSchedule schedule;
+    schedule.enabled = enabled;
+    schedule.dayOfWeek = dayOfWeek;
+    schedule.hour = hour;
+    schedule.minute = minute;
+    schedule.mode = mode;
+    return schedule;
+}
+
+void TestScheduledExitCountdown()
+{
+    MaNGOS::ScheduledExitSchedule const disabled = MakeSchedule(
+        false, 3, 5, 0, MaNGOS::SCHEDULED_EXIT_MODE_RESTART);
+    CHECK(ScheduledExitSecondsRemaining(
+        disabled, MakeLocalTime(3, 4, 0, 0)) == -1);
+    CHECK(FormatScheduledExitCountdown(
+        disabled, MakeLocalTime(3, 4, 0, 0)).empty());
+
+    // Wednesday 05:00 restart, seen from Wednesday 04:47:30.
+    // fireOfDay 18000 - nowOfDay 17250 = 750 = 12m30s.
+    MaNGOS::ScheduledExitSchedule const restart = MakeSchedule(
+        true, 3, 5, 0, MaNGOS::SCHEDULED_EXIT_MODE_RESTART);
+    CHECK(ScheduledExitSecondsRemaining(
+        restart, MakeLocalTime(3, 4, 47, 30)) == 750);
+    CHECK(FormatScheduledExitCountdown(
+        restart, MakeLocalTime(3, 4, 47, 30)) == "Restart in 12m30s");
+
+    // Outside the threshold nothing is shown, even though it is still due.
+    CHECK(ScheduledExitSecondsRemaining(
+        restart, MakeLocalTime(3, 2, 0, 0)) == 10800);
+    CHECK(FormatScheduledExitCountdown(
+        restart, MakeLocalTime(3, 2, 0, 0)).empty());
+
+    // A day already past this week rolls forward to next week:
+    // daysAhead = 3 - 4 = -1, +7 = 6, same time of day.
+    CHECK(ScheduledExitSecondsRemaining(
+        restart, MakeLocalTime(4, 5, 0, 0)) == 6 * 86400);
+
+    // Same day, fire time already 30s gone by: -30 + one week.
+    CHECK(ScheduledExitSecondsRemaining(
+        restart, MakeLocalTime(3, 5, 0, 30)) == 7 * 86400 - 30);
+
+    // Shutdown mode names itself. 84600 - 84555 = 45.
+    MaNGOS::ScheduledExitSchedule const shutdown = MakeSchedule(
+        true, 0, 23, 30, MaNGOS::SCHEDULED_EXIT_MODE_SHUTDOWN);
+    CHECK(FormatScheduledExitCountdown(
+        shutdown, MakeLocalTime(0, 23, 29, 15)) == "Shutdown in 45s");
+}
 }
 
 int main()
 {
     TestFirstObserveOnlyPrimes();
+    TestScheduledExitCountdown();
     TestShortDurationFormatting();
     TestDbHealthReportsOnlyTransitions();
     TestDbHealthDownBeforeAnySuccess();

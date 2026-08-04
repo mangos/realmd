@@ -140,6 +140,17 @@ namespace MaNGOS::Realmd
 
         text += " \xC2\xB7 up ";
         text += FormatUptime(status.uptimeSeconds);
+
+        // The scheduled-exit countdown is appended here and nowhere else:
+        // FormatHeaderRight is the sole owner of the header line, and
+        // PublishStatus is the sole caller of SetHeaderRight. U+00B7 is written
+        // as explicit UTF-8 bytes so this file stays ASCII on disk.
+        if (!status.scheduledExit.empty())
+        {
+            text += " \xC2\xB7 ";
+            text += status.scheduledExit;
+        }
+
         return text;
     }
 

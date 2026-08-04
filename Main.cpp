@@ -727,6 +727,7 @@ extern int main(int argc, char** argv)
     // Not const: StatusSource::Gather is non-const by design and stays so.
     MaNGOS::Realmd::StatusSource statusSource(
         bindIp, rmport, patchServing, time(NULL));
+    statusSource.SetScheduledExit(s_scheduledExit);
 
 #ifndef WIN32
     detachDaemon();

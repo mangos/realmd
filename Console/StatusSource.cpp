@@ -35,6 +35,8 @@
 #include <utility>
 #include "Auth/AuthCounters.h"
 #include "Console/LoginDbHealth.h"
+#include "Events/ScheduledExitCountdown.h"
+#include "Util.h"
 
 namespace MaNGOS::Realmd
 {
@@ -46,6 +48,12 @@ namespace MaNGOS::Realmd
           m_startedAt(startedAt)
     {
     }
+
+        void StatusSource::SetScheduledExit(
+            MaNGOS::ScheduledExitSchedule const& schedule)
+        {
+            m_scheduledExit = schedule;
+        }
 
     RealmdStatus StatusSource::Gather(time_t now)
     {
@@ -98,6 +106,8 @@ namespace MaNGOS::Realmd
             ApplyRealmSnapshot(*snapshot, now, status);
         }
 
+            status.scheduledExit = FormatScheduledExitCountdown(
+                m_scheduledExit, safe_localtime(now));
         return status;
     }
 }

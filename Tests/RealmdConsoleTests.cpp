@@ -341,6 +341,28 @@ void TestIdleStatusRendersCleanly()
     CHECK_EQ(FormatHeaderRight(status),
         "0.0.0.0:0 \xC2\xB7 DB \xE2\x80\x94 \xC2\xB7 up 0d 00:00:00");
 }
+
+void TestHeaderRightAppendsScheduledExit()
+{
+    MaNGOS::Realmd::RealmdStatus status;
+    status.bindIp = "0.0.0.0";
+    status.port = 3724;
+    status.dbProbed = true;
+    status.dbOk = true;
+    status.dbLatencyMs = 4;
+    status.uptimeSeconds = 62;
+
+    // Empty countdown: the header is byte-for-byte what phase 2 locked. This
+    // half must PASS both before and after the change below -- it is the guard
+    // that the append does not disturb the existing line.
+    CHECK_EQ(MaNGOS::Realmd::FormatHeaderRight(status),
+        "0.0.0.0:3724 \xC2\xB7 DB ok 4ms \xC2\xB7 up 0d 00:01:02");
+
+    status.scheduledExit = "Restart in 12m30s";
+    CHECK_EQ(MaNGOS::Realmd::FormatHeaderRight(status),
+        "0.0.0.0:3724 \xC2\xB7 DB ok 4ms \xC2\xB7 up 0d 00:01:02"
+        " \xC2\xB7 Restart in 12m30s");
+}
 }
 
 int main()
@@ -360,6 +382,7 @@ int main()
     TestFailureRate();
     TestFixedStatusRendersEverySlot();
     TestIdleStatusRendersCleanly();
+    TestHeaderRightAppendsScheduledExit();
     if (failures != 0)
     {
         std::cerr << failures << " realmd console check(s) failed\n";

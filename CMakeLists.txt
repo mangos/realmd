@@ -342,6 +342,7 @@ if(WITH_TESTS OR BUILD_TESTING)
         Events/DbHealthTracker.cpp
         Events/EventFormat.cpp
         Events/RealmChangeTracker.cpp
+        Events/ScheduledExitCountdown.cpp
     )
     target_compile_features(realmd_event_tests PUBLIC cxx_std_17)
     set_target_properties(realmd_event_tests PROPERTIES CXX_EXTENSIONS OFF)
