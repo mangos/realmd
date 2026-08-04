@@ -92,9 +92,23 @@ FrameDecision InspectFrame(
                 return Reject(RejectReason::MalformedLength);
             }
 
+            // Every C0 control byte and DEL, not merely NUL. The account name
+            // is interpolated into the lookup statement (AuthSocket.cpp:617)
+            // and DatabaseMysql logs the whole statement when a query fails,
+            // so a control byte here reaches whatever the log sink happens to
+            // be. With Console.Style plain -- or a writer whose UI is not
+            // active -- that sink is a raw fwrite to the operator's terminal,
+            // which never passes through ConsoleUI::Sanitise. An ESC would
+            // then be a terminal control sequence rather than text.
+            //
+            // Refusing them at the boundary costs nothing: no account name
+            // legitimately contains a control character, and one that does
+            // cannot match a row in `account` anyway. Doing it here rather
+            // than at every sink means the bytes never enter the process.
             for (std::size_t i = 0; i < accountLength; ++i)
             {
-                if (data[ChallengeAccountDataOffset + i] == 0)
+                std::uint8_t const ch = data[ChallengeAccountDataOffset + i];
+                if (ch < 0x20 || ch == 0x7F)
                 {
                     return Reject(RejectReason::MalformedLength);
                 }

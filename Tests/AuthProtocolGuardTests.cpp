@@ -175,6 +175,33 @@ void CheckChallengeFraming()
     decision = InspectFrame(
         StreamState::Challenge, embeddedNul.data(), embeddedNul.size());
     CHECK(decision.status == FrameStatus::Reject);
+
+    // An ESC in the account name is the byte that matters: the name is
+    // interpolated into the account lookup, and a failing query is logged
+    // whole -- to a raw fwrite under Console.Style plain. Rejecting it here
+    // is what keeps terminal control out of client reach.
+    std::vector<std::uint8_t> embeddedEsc =
+        MakeChallenge(
+            CMD_AUTH_LOGON_CHALLENGE, 5875, std::string("TE\x1B[2JST", 8));
+    decision = InspectFrame(
+        StreamState::Challenge, embeddedEsc.data(), embeddedEsc.size());
+    CHECK(decision.status == FrameStatus::Reject);
+    CHECK(decision.reason == RejectReason::MalformedLength);
+
+    // DEL is the other end of the same range and is easy to omit.
+    std::vector<std::uint8_t> embeddedDel =
+        MakeChallenge(
+            CMD_AUTH_LOGON_CHALLENGE, 5875, std::string("TE\x7FST", 5));
+    decision = InspectFrame(
+        StreamState::Challenge, embeddedDel.data(), embeddedDel.size());
+    CHECK(decision.status == FrameStatus::Reject);
+
+    // A plain name must still pass, or the loop above rejects everything.
+    std::vector<std::uint8_t> ordinary =
+        MakeChallenge(CMD_AUTH_LOGON_CHALLENGE, 5875, std::string("TEST"));
+    decision = InspectFrame(
+        StreamState::Challenge, ordinary.data(), ordinary.size());
+    CHECK(decision.status == FrameStatus::Complete);
 }
 
 void CheckFixedFraming()
