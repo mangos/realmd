@@ -61,6 +61,7 @@
 #include "AuthResultPolicy.h"
 #include "PatchArtifact.h"
 #include "PatchHandler.h"
+#include "Events/ConnectionChurn.h"
 
 #include <openssl/md5.h>
 
@@ -197,6 +198,7 @@ AuthSocket::AuthSocket(
     // open connections including this one is that plus one.
     uint32 const open = s_connections.fetch_add(1, std::memory_order_relaxed) + 1;
     MaNGOS::Realmd::RaiseHighWaterMark(s_peakConnections, open);
+    MaNGOS::Realmd::RecordConnectionAccept();
 }
 
 AuthSocket::~AuthSocket()
@@ -206,6 +208,7 @@ AuthSocket::~AuthSocket()
         s_authed.fetch_sub(1, std::memory_order_relaxed);
     }
     s_connections.fetch_sub(1, std::memory_order_relaxed);
+    MaNGOS::Realmd::RecordConnectionClose();
 }
 
 // --- Buffered-stream emulation --------------------------------------------------
@@ -279,6 +282,7 @@ bool AuthSocket::ExpireAuthentication(
 
     DEBUG_LOG("[Auth] Authentication deadline expired for '%s'",
               get_remote_address().c_str());
+    MaNGOS::Realmd::RecordAuthDeadlineExpiry();
     close_connection();
     return true;
 }

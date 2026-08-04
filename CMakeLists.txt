@@ -339,6 +339,7 @@ if(WITH_TESTS OR BUILD_TESTING)
     # "Cannot find source file: Tests/RealmdEventTests.cpp".
     add_executable(realmd_event_tests
         Tests/RealmdEventTests.cpp
+        Events/ConnectionChurn.cpp
         Events/DbHealthTracker.cpp
         Events/EventFormat.cpp
         Events/RealmChangeTracker.cpp

@@ -195,6 +195,7 @@ namespace MaNGOS::Realmd
         ui.SetStatus(5, "Patch", status.patchEnabled ? "on" : "off");
 
         ui.SetStatus(6, "Fail", FormatFailureRate(status));
+        ui.SetStatus(7, "Churn", status.churn);
 
         ui.SetHeaderRight(FormatHeaderRight(status));
 

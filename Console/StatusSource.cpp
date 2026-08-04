@@ -108,6 +108,8 @@ namespace MaNGOS::Realmd
 
             status.scheduledExit = FormatScheduledExitCountdown(
                 m_scheduledExit, safe_localtime(now));
+            m_churn.Sample(LoadChurnTotals(), now);
+            status.churn = FormatChurnField(m_churn);
         return status;
     }
 }

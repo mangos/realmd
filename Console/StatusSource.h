@@ -34,6 +34,7 @@
 #include <ctime>
 #include <string>
 #include "ScheduledExit.h"
+#include "Events/ConnectionChurn.h"
 
 namespace MaNGOS::Realmd
 {
@@ -92,6 +93,7 @@ namespace MaNGOS::Realmd
             bool m_patchEnabled;
             time_t m_startedAt;
             MaNGOS::ScheduledExitSchedule m_scheduledExit;
+            ChurnWindow m_churn;
             // Phase 4 adds `ChurnWindow m_churn;` here, and nothing else.
     };
 }

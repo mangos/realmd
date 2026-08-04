@@ -22,6 +22,7 @@
  * and lore are copyrighted by Blizzard Entertainment, Inc.
  */
 #include "Events/RealmChangeTracker.h"
+#include "Events/ConnectionChurn.h"
 #include "Events/ScheduledExitCountdown.h"
 #include "Events/EventFormat.h"
 #include "Events/DbHealthTracker.h"
@@ -45,6 +46,13 @@ using MaNGOS::Realmd::DbProbeState;
 using MaNGOS::Realmd::LoginDbHealth;
 using MaNGOS::Realmd::FormatScheduledExitCountdown;
 using MaNGOS::Realmd::ScheduledExitSecondsRemaining;
+using MaNGOS::Realmd::ChurnTotals;
+using MaNGOS::Realmd::ChurnWindow;
+using MaNGOS::Realmd::FormatChurnField;
+using MaNGOS::Realmd::LoadChurnTotals;
+using MaNGOS::Realmd::RecordAuthDeadlineExpiry;
+using MaNGOS::Realmd::RecordConnectionAccept;
+using MaNGOS::Realmd::RecordConnectionClose;
 
 namespace
 {
@@ -252,11 +260,115 @@ void TestScheduledExitCountdown()
     CHECK(FormatScheduledExitCountdown(
         shutdown, MakeLocalTime(0, 23, 29, 15)) == "Shutdown in 45s");
 }
+
+ChurnTotals MakeTotals(uint32 accepts, uint32 closes, uint32 authTimeouts)
+{
+    ChurnTotals totals;
+    totals.accepts = accepts;
+    totals.closes = closes;
+    totals.authTimeouts = authTimeouts;
+    return totals;
+}
+
+void TestChurnCountersAreMonotonic()
+{
+    ChurnTotals const before = LoadChurnTotals();
+    RecordConnectionAccept();
+    RecordConnectionAccept();
+    RecordConnectionClose();
+    RecordAuthDeadlineExpiry();
+    ChurnTotals const after = LoadChurnTotals();
+
+    CHECK(after.accepts - before.accepts == 2);
+    CHECK(after.closes - before.closes == 1);
+    CHECK(after.authTimeouts - before.authTimeouts == 1);
+}
+
+// Every expectation below is the arithmetic Sample() actually performs. The
+// deque state is written out at each step so a reader can check it without
+// running the code.
+void TestChurnWindowRates()
+{
+    ChurnWindow window(60);
+
+    // [ {1000,(100,90,3)} ] -- one reading proves nothing yet.
+    window.Sample(MakeTotals(100, 90, 3), 1000);
+    CHECK(window.SpanSeconds() == 0);
+    CHECK(!window.Full());
+    CHECK(window.Rates().accepts == 0);
+
+    // Same second: the reading is REPLACED, not appended. The window now holds
+    // exactly [ {1000,(104,92,3)} ], so (104,92,3) is also the new baseline.
+    window.Sample(MakeTotals(104, 92, 3), 1000);
+    CHECK(window.SpanSeconds() == 0);
+    CHECK(window.Rates().accepts == 0);
+
+    // [ {1000,(104,92,3)}, {1030,(112,99,6)} ]
+    // oldest = 1030 - 60 = 970; front 1000 is not < 970, so nothing is evicted.
+    // Rates = 112-104, 99-92, 6-3 = 8, 7, 3. Span = 1030 - 1000 = 30.
+    window.Sample(MakeTotals(112, 99, 6), 1030);
+    CHECK(window.SpanSeconds() == 30);
+    CHECK(!window.Full());
+    CHECK(window.Rates().accepts == 8);
+    CHECK(window.Rates().closes == 7);
+    CHECK(window.Rates().authTimeouts == 3);
+    CHECK(FormatChurnField(window) == "~+8/-7 \xC2\xB7 3to");
+
+    // [ {1000,(104,92,3)}, {1030,(112,99,6)}, {1060,(150,140,8)} ]
+    // oldest = 1060 - 60 = 1000; front 1000 is not < 1000, so nothing is
+    // evicted. Rates = 150-104, 140-92, 8-3 = 46, 48, 5. Span = 60, so the
+    // window is Full and the '~' prefix drops.
+    window.Sample(MakeTotals(150, 140, 8), 1060);
+    CHECK(window.SpanSeconds() == 60);
+    CHECK(window.Full());
+    CHECK(window.Rates().accepts == 46);
+    CHECK(window.Rates().closes == 48);
+    CHECK(FormatChurnField(window) == "+46/-48 \xC2\xB7 5to");
+
+    // oldest = 1061 - 60 = 1001; front 1000 < 1001, so the 1000 reading is
+    // evicted and the front becomes 1030.
+    // [ {1030,(112,99,6)}, {1060,(150,140,8)}, {1061,(151,141,8)} ]
+    // Rates = 151-112 = 39. Span = 1061 - 1030 = 31, NOT 60: with samples this
+    // sparse the retained span shrinks below the window after an eviction. The
+    // daemon samples once per second, so in production the deque is continuous
+    // and the span sits at 60 permanently.
+    window.Sample(MakeTotals(151, 141, 8), 1061);
+    CHECK(window.SpanSeconds() == 31);
+    CHECK(!window.Full());
+    CHECK(window.Rates().accepts == 39);
+}
+
+void TestChurnWindowSurvivesClockGoingBackwards()
+{
+    ChurnWindow window(60);
+    window.Sample(MakeTotals(10, 5, 0), 2000);
+    window.Sample(MakeTotals(20, 15, 1), 2030);
+    CHECK(window.SpanSeconds() == 30);
+
+    // Wall clock steps back: the retained span is meaningless, so start again.
+    window.Sample(MakeTotals(21, 16, 1), 1500);
+    CHECK(window.SpanSeconds() == 0);
+    CHECK(window.Rates().accepts == 0);
+}
+
+void TestChurnTotalsWrapCorrectly()
+{
+    // 5u - 0xFFFFFFF0u wraps to 21 in unsigned arithmetic: 16 counts to reach
+    // the wrap plus 5 after it.
+    ChurnWindow window(60);
+    window.Sample(MakeTotals(0xFFFFFFF0u, 0, 0), 3000);
+    window.Sample(MakeTotals(0x00000005u, 0, 0), 3010);
+    CHECK(window.Rates().accepts == 21);
+}
 }
 
 int main()
 {
     TestFirstObserveOnlyPrimes();
+    TestChurnCountersAreMonotonic();
+    TestChurnWindowRates();
+    TestChurnWindowSurvivesClockGoingBackwards();
+    TestChurnTotalsWrapCorrectly();
     TestScheduledExitCountdown();
     TestShortDurationFormatting();
     TestDbHealthReportsOnlyTransitions();
