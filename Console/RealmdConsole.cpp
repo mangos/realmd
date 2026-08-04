@@ -87,15 +87,29 @@ namespace MaNGOS::Realmd
         return text;
     }
 
+    std::string FormatConnections(RealmdStatus const& status)
+    {
+        // live / at-realm-select / peak, with the key spelled out because
+        // "12/3/47" alone is three numbers with no way to tell which is which.
+        std::string text = std::to_string(status.connections);
+        text += "/";
+        text += std::to_string(status.authWaiting);
+        text += "/";
+        text += std::to_string(status.peakConnections);
+        text += " L/S/P";
+        return text;
+    }
+
     std::string FormatLogons(RealmdStatus const& status)
     {
         uint32 const failed = status.logonsFailedRejected +
             status.logonsFailedBadProof + status.logonsFailedBuild;
 
         std::string text = std::to_string(status.logonsOk + failed);
-        text += " / ";
+        text += "/";
         text += std::to_string(failed);
-        text += " fail";
+        text += " \xC2\xB7 ";
+        text += FormatFailureRate(status);
         return text;
     }
 
@@ -167,7 +181,7 @@ namespace MaNGOS::Realmd
         // columns only slots 0-3 are on screen -- and slot 3 only because a
         // realistic Logons value is under 22 cells wide; wider terminals
         // reveal the rest. Nothing outside this function writes a status slot.
-        ui.SetStatus(0, "Conn", std::to_string(status.connections));
+        ui.SetStatus(0, "Conn", FormatConnections(status));
         ui.SetStatus(1, "Realms", FormatRealms(status),
             status.realmsOnline < status.realmsTotal
                 ? MaNGOS::Console::STYLE_WARN
@@ -190,12 +204,9 @@ namespace MaNGOS::Realmd
         ui.SetStatus(2, "Logons", FormatLogons(status),
             failureFlood ? MaNGOS::Console::STYLE_WARN
                          : MaNGOS::Console::STYLE_NORMAL);
-        ui.SetStatus(3, "Sel", std::to_string(status.authWaiting));
-        ui.SetStatus(4, "Peak", std::to_string(status.peakConnections));
-        ui.SetStatus(5, "Patch", status.patchEnabled ? "on" : "off");
+        ui.SetStatus(3, "Patch", status.patchEnabled ? "on" : "off");
 
-        ui.SetStatus(6, "Fail", FormatFailureRate(status));
-        ui.SetStatus(7, "Churn", status.churn);
+        ui.SetStatus(4, "Churn", status.churn);
 
         ui.SetHeaderRight(FormatHeaderRight(status));
 

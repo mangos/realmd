@@ -166,10 +166,10 @@ void TestLogonsField()
     status.logonsFailedRejected = 21;
     status.logonsFailedBadProof = 12;
     status.logonsFailedBuild = 4;
-    CHECK_EQ(FormatLogons(status), "1284 / 37 fail");
+    CHECK_EQ(FormatLogons(status), "1284/37 \xC2\xB7 2.9%");
 
     RealmdStatus idle;
-    CHECK_EQ(FormatLogons(idle), "0 / 0 fail");
+    CHECK_EQ(FormatLogons(idle), "0/0 \xC2\xB7 \xE2\x80\x94");
 }
 
 void TestActivityLineTracksPatchTransfers()
@@ -306,7 +306,7 @@ void TestFixedStatusRendersEverySlot()
 
     CHECK_EQ(std::to_string(status.connections), "12");
     CHECK_EQ(FormatRealms(status), "4/5 \xC2\xB7 3m ago");
-    CHECK_EQ(FormatLogons(status), "1284 / 37 fail");
+    CHECK_EQ(FormatLogons(status), "1284/37 \xC2\xB7 2.9%");
     CHECK_EQ(std::to_string(status.authWaiting), "3");
     CHECK_EQ(std::to_string(status.peakConnections), "47");
     CHECK_EQ(status.patchEnabled ? "on" : "off", "on");
@@ -335,7 +335,7 @@ void TestIdleStatusRendersCleanly()
     RealmdStatus const status;
 
     CHECK_EQ(FormatRealms(status), "0/0 \xC2\xB7 never");
-    CHECK_EQ(FormatLogons(status), "0 / 0 fail");
+    CHECK_EQ(FormatLogons(status), "0/0 \xC2\xB7 \xE2\x80\x94");
     CHECK_EQ(FormatFailureRate(status), "\xE2\x80\x94");
     CHECK_EQ(FormatActivity(status), "");
     CHECK_EQ(FormatHeaderRight(status),

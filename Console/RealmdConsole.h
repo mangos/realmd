@@ -51,6 +51,8 @@ namespace MaNGOS::Realmd
     std::string FormatRealms(RealmdStatus const& status);
 
     /// Status slot 2: "1284 / 37 fail" -- attempts, then failures among them.
+    std::string FormatConnections(RealmdStatus const& status);
+
     std::string FormatLogons(RealmdStatus const& status);
 
     /**
