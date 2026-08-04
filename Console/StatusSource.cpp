@@ -33,6 +33,8 @@
 #include "Realm/RealmList.h"
 
 #include <utility>
+#include "Auth/AuthCounters.h"
+#include "Console/LoginDbHealth.h"
 
 namespace MaNGOS::Realmd
 {
@@ -55,6 +57,24 @@ namespace MaNGOS::Realmd
 
         status.connections = AuthSocket::GetConnectionCount();
         status.authWaiting = AuthSocket::GetAuthWaitingCount();
+    status.peakConnections = AuthSocket::GetPeakConnectionCount();
+
+    // Translated onto the flat RealmdStatus fields rather than stored whole:
+    // the struct is the display's vocabulary and the formatters and their
+    // tests are already written against these four names.
+    MaNGOS::Realmd::LogonCounts const logons = MaNGOS::Realmd::GetLogonCounts();
+    status.logonsOk = logons.ok;
+    status.logonsFailedRejected = logons.rejected;
+    status.logonsFailedBadProof = logons.badProof;
+    status.logonsFailedBuild = logons.buildPatch;
+
+    // DbProbeState is three-valued; RealmdStatus is two booleans. Unknown must
+    // map to dbProbed == false, which is what makes FormatHeaderRight render
+    // "DB \xE2\x80\x94 " instead of claiming a healthy database at 0 ms.
+    MaNGOS::Realmd::LoginDbHealth const db = MaNGOS::Realmd::GetLoginDbHealth();
+    status.dbProbed = (db.state != MaNGOS::Realmd::DbProbeState::Unknown);
+    status.dbOk = (db.state == MaNGOS::Realmd::DbProbeState::Ok);
+    status.dbLatencyMs = db.latencyMs;
 
         // Drives the console activity line. Counts guards, not sockets, so a
         // transfer is live from the moment it is accepted until its detached

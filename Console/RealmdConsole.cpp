@@ -161,7 +161,24 @@ namespace MaNGOS::Realmd
             status.realmsOnline < status.realmsTotal
                 ? MaNGOS::Console::STYLE_WARN
                 : MaNGOS::Console::STYLE_NORMAL);
-        ui.SetStatus(2, "Logons", FormatLogons(status));
+        // Slot 2. A quarter of attempts failing is a flood, a misconfigured
+        // client build or a broken account table, none of which should read as
+        // normal. Integer arithmetic, no division and no second failure-rate
+        // helper: FormatFailureRate owns the displayed percentage in slot 6,
+        // this only decides a colour. The uint64 intermediates keep the
+        // comparison exact past 43 million attempts, where uint32 * 100 wraps.
+        uint32 const failedAttempts =
+            status.logonsFailedRejected + status.logonsFailedBadProof +
+            status.logonsFailedBuild;
+        uint32 const totalAttempts = status.logonsOk + failedAttempts;
+        bool const failureFlood =
+            totalAttempts > 0 &&
+            static_cast<uint64>(failedAttempts) * 100 >=
+                static_cast<uint64>(totalAttempts) * 25;
+
+        ui.SetStatus(2, "Logons", FormatLogons(status),
+            failureFlood ? MaNGOS::Console::STYLE_WARN
+                         : MaNGOS::Console::STYLE_NORMAL);
         ui.SetStatus(3, "Sel", std::to_string(status.authWaiting));
         ui.SetStatus(4, "Peak", std::to_string(status.peakConnections));
         ui.SetStatus(5, "Patch", status.patchEnabled ? "on" : "off");
