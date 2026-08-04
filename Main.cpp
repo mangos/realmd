@@ -62,6 +62,7 @@
 #include "Console/StatusSource.h"
 #include "SystemConfig.h"
 #include "ScheduledExit.h"
+#include "Events/RealmChangeTracker.h"
 #include "Util.h"
 
 #include <openssl/opensslv.h>
@@ -135,6 +136,9 @@ namespace
 
     MaNGOS::ScheduledExitSchedule s_scheduledExit;
     MaNGOS::ScheduledExitState s_scheduledExitState;
+
+    MaNGOS::Realmd::RealmChangeTracker s_realmChanges;
+    RealmSnapshotStore::SnapshotPtr s_lastRealmSnapshot;
 
     void LoadScheduledExitConfig()
     {
@@ -249,6 +253,39 @@ namespace
                 std::chrono::steady_clock::now() - started).count());
 
         MaNGOS::Realmd::RecordLoginDbProbe(ok, latencyMs, time(NULL));
+    }
+
+    /// Diff the published realm snapshot and log only what actually changed.
+    ///
+    /// The tick reads the snapshot, it never refreshes it: refreshing here
+    /// would win RealmRefreshGate::RunIfDue's try_to_lock essentially every
+    /// time and migrate a database query plus up to three untimed
+    /// getaddrinfo() calls per realm onto the thread that drives auth-deadline
+    /// expiry, the MySQL ping and the scheduled-exit exact-minute match.
+    ///
+    /// This helper logs and does nothing else. It must never touch ConsoleUI:
+    /// PublishStatus is realmd's only publisher.
+    void ReportRealmChanges()
+    {
+        RealmSnapshotStore::SnapshotPtr snapshot = sRealmList.GetSnapshot();
+        if (snapshot == s_lastRealmSnapshot)
+        {
+            return;
+        }
+
+        s_lastRealmSnapshot = snapshot;
+
+        std::vector<MaNGOS::Realmd::RealmChangeEvent> events;
+        if (!s_realmChanges.Observe(*snapshot, events))
+        {
+            return;
+        }
+
+        for (MaNGOS::Realmd::RealmChangeEvent const& event : events)
+        {
+            sLog.outString("%s",
+                MaNGOS::Realmd::FormatRealmChangeEvent(event).c_str());
+        }
     }
 }
 
@@ -701,6 +738,7 @@ extern int main(int argc, char** argv)
         // discarded and the call exists only to stop keystrokes typed during
         // the run being replayed into the operator's shell after exit.
         console.DrainInput();
+        ReportRealmChanges();
 
         // Once a second: ten iterations of the 100 ms housekeeping loop. The
         // console writer repaints on its own roughly every 5 ms, so nothing

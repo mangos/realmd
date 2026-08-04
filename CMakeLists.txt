@@ -34,6 +34,10 @@ source_group("Realmlist" FILES ${SRC_GRP_REALM})
 file(GLOB_RECURSE SRC_GRP_CONSOLE Console/*.cpp Console/*.h)
 source_group("Console" FILES ${SRC_GRP_CONSOLE})
 
+#Event Files
+file(GLOB_RECURSE SRC_GRP_EVENTS Events/*.cpp Events/*.h)
+source_group("Events" FILES ${SRC_GRP_EVENTS})
+
 
 configure_file(realmd.conf.dist.in ${CMAKE_CURRENT_BINARY_DIR}/realmd.conf.dist)
 
@@ -48,6 +52,7 @@ add_executable(realmd
     ${SRC_GRP_AUTH}
     ${SRC_GRP_REALM}
     ${SRC_GRP_CONSOLE}
+    ${SRC_GRP_EVENTS}
     Main.cpp
     $<$<BOOL:${WIN32}>:
         ${CMAKE_CURRENT_BINARY_DIR}/VersionInfo.h
@@ -321,4 +326,37 @@ if(WITH_TESTS OR BUILD_TESTING)
             -DREALMD_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CheckLogonCounters.cmake
     )
+
+
+    # Sources are listed explicitly, never globbed: this target is the
+    # authoritative Phase 4 gate and its contents must not depend on what
+    # happens to be present in Events/ at configure time.
+    #
+    # Tests/RealmdEventTests.cpp is created in Step 4. Listing it here is safe
+    # because nothing re-runs CMake in between -- Step 5 builds through the .cmd
+    # script, not through CMake. Do NOT configure the build tree until Step 4 has
+    # created the file, or configure fails with
+    # "Cannot find source file: Tests/RealmdEventTests.cpp".
+    add_executable(realmd_event_tests
+        Tests/RealmdEventTests.cpp
+        Events/RealmChangeTracker.cpp
+    )
+    target_compile_features(realmd_event_tests PUBLIC cxx_std_17)
+    set_target_properties(realmd_event_tests PROPERTIES CXX_EXTENSIONS OFF)
+    target_include_directories(realmd_event_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    # Mandatory: this target includes headers from src/shared (Platform/Define.h,
+    # Common/ServerDefines.h, Common/TimeConstants.h, Utilities/ScheduledExit.h).
+    # `shared` exports its source directory and its Utilities subdirectory PUBLIC
+    # (src/shared/CMakeLists.txt:215-233,261-266) AND already compiles
+    # Utilities/ScheduledExit.cpp into libshared, so that translation unit is NOT
+    # listed here -- only the inner `cl` script, which has no library to link,
+    # needs it by name. The parent core's hardcoded realmd test list at
+    # Zero/server/src/CMakeLists.txt:65-73 cannot be extended from this
+    # submodule, so linking `shared` is the only sanctioned route.
+    target_link_libraries(realmd_event_tests PRIVATE
+        shared
+    )
+    add_test(NAME realmd_event_tests COMMAND realmd_event_tests)
 endif()
