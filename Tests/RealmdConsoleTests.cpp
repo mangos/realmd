@@ -16,6 +16,7 @@ using MaNGOS::Realmd::FormatRealms;
 using MaNGOS::Realmd::FormatLogons;
 using MaNGOS::Realmd::FormatActivity;
 using MaNGOS::Realmd::FormatHeaderRight;
+using MaNGOS::Realmd::FormatFailureRate;
 
 namespace
 {
@@ -250,6 +251,96 @@ void TestAccountNameFolding()
     // Lead byte outside the encodable range (> U+10FFFF).
     CHECK_EQ(FoldAccountName("\xF5\x80"), "??");
 }
+
+void TestFailureRate()
+{
+    RealmdStatus status;
+    status.logonsOk = 1247;
+    status.logonsFailedRejected = 21;
+    status.logonsFailedBadProof = 12;
+    status.logonsFailedBuild = 4;
+    // 37 of 1284 = 2.881%, rounded to one decimal.
+    CHECK_EQ(FormatFailureRate(status), "2.9%");
+
+    RealmdStatus perfect;
+    perfect.logonsOk = 10;
+    CHECK_EQ(FormatFailureRate(perfect), "0.0%");
+
+    RealmdStatus total;
+    total.logonsFailedBuild = 3;
+    CHECK_EQ(FormatFailureRate(total), "100.0%");
+
+    // No attempts at all is not a zero rate, it is no rate.
+    RealmdStatus idle;
+    CHECK_EQ(FormatFailureRate(idle), "\xE2\x80\x94");
+}
+
+RealmdStatus MakeFixedStatus()
+{
+    RealmdStatus status;
+    status.bindIp = "0.0.0.0";
+    status.port = 3724;
+    status.patchEnabled = true;
+    status.connections = 12;
+    status.authWaiting = 3;
+    status.peakConnections = 47;
+    status.realmsTotal = 5;
+    status.realmsOnline = 4;
+    status.snapshotAgeSeconds = 185;
+    status.snapshotPublished = true;
+    status.logonsOk = 1247;
+    status.logonsFailedRejected = 21;
+    status.logonsFailedBadProof = 12;
+    status.logonsFailedBuild = 4;
+    status.patchTransfersActive = 2;
+    status.dbProbed = true;
+    status.dbOk = true;
+    status.dbLatencyMs = 4;
+    status.uptimeSeconds = 273112;
+    return status;
+}
+
+void TestFixedStatusRendersEverySlot()
+{
+    RealmdStatus const status = MakeFixedStatus();
+
+    CHECK_EQ(std::to_string(status.connections), "12");
+    CHECK_EQ(FormatRealms(status), "4/5 \xC2\xB7 3m ago");
+    CHECK_EQ(FormatLogons(status), "1284 / 37 fail");
+    CHECK_EQ(std::to_string(status.authWaiting), "3");
+    CHECK_EQ(std::to_string(status.peakConnections), "47");
+    CHECK_EQ(status.patchEnabled ? "on" : "off", "on");
+    CHECK_EQ(FormatFailureRate(status), "2.9%");
+    CHECK_EQ(FormatHeaderRight(status),
+        "0.0.0.0:3724 \xC2\xB7 DB ok 4ms \xC2\xB7 up 3d 03:51:52");
+
+    // The activity line is driven by patchTransfersActive and by nothing else.
+    // If StatusSource::Gather ever stops calling ActivePatchTransfers(), this
+    // is the field that silently goes blank, so assert on the value that
+    // produces the string rather than on the string alone.
+    CHECK(status.patchTransfersActive == 2);
+    CHECK_EQ(FormatActivity(status), "2 patch transfers");
+
+    // churn and scheduledExit are phase 4's to fill, but they are phase 2's to
+    // declare. A phase that re-declares either breaks this line first.
+    CHECK(status.churn.empty());
+    CHECK(status.scheduledExit.empty());
+}
+
+void TestIdleStatusRendersCleanly()
+{
+    // What phase 2 actually produces on a fresh start with no clients: no
+    // connections, no logons, no database probe. Nothing may render as an
+    // empty field or a wrapped unsigned value.
+    RealmdStatus const status;
+
+    CHECK_EQ(FormatRealms(status), "0/0 \xC2\xB7 never");
+    CHECK_EQ(FormatLogons(status), "0 / 0 fail");
+    CHECK_EQ(FormatFailureRate(status), "\xE2\x80\x94");
+    CHECK_EQ(FormatActivity(status), "");
+    CHECK_EQ(FormatHeaderRight(status),
+        "0.0.0.0:0 \xC2\xB7 DB \xE2\x80\x94 \xC2\xB7 up 0d 00:00:00");
+}
 }
 
 int main()
@@ -266,6 +357,9 @@ int main()
     TestActivityLineTracksPatchTransfers();
     TestHeaderRightDatabaseStates();
     TestAccountNameFolding();
+    TestFailureRate();
+    TestFixedStatusRendersEverySlot();
+    TestIdleStatusRendersCleanly();
     if (failures != 0)
     {
         std::cerr << failures << " realmd console check(s) failed\n";

@@ -84,6 +84,14 @@ namespace MaNGOS::Realmd
      * realmd, in this and every later phase.
      */
     void PublishStatus(RealmdStatus const& status);
+
+    /**
+     * @brief Status slot 6: failed logons as a percentage, one decimal.
+     *
+     * An em dash when nothing has been attempted, because zero of zero is not
+     * a healthy zero percent.
+     */
+    std::string FormatFailureRate(RealmdStatus const& status);
 }
 
 #endif

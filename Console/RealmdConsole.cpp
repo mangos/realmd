@@ -166,6 +166,8 @@ namespace MaNGOS::Realmd
         ui.SetStatus(4, "Peak", std::to_string(status.peakConnections));
         ui.SetStatus(5, "Patch", status.patchEnabled ? "on" : "off");
 
+        ui.SetStatus(6, "Fail", FormatFailureRate(status));
+
         ui.SetHeaderRight(FormatHeaderRight(status));
 
         // Cleared by writing an empty activity, never by SetProgress(-1):
@@ -173,5 +175,27 @@ namespace MaNGOS::Realmd
         // calling it after SetActivity would erase the line just written. The
         // progress bar stays unused.
         ui.SetActivity(FormatActivity(status));
+    }
+
+    std::string FormatFailureRate(RealmdStatus const& status)
+    {
+        uint32 const failed = status.logonsFailedRejected +
+            status.logonsFailedBadProof + status.logonsFailedBuild;
+        uint32 const attempts = status.logonsOk + failed;
+
+        if (attempts == 0)
+        {
+            return std::string("\xE2\x80\x94");
+        }
+
+        // Integer tenths of a percent, rounded half-up. 64-bit so a long-lived
+        // daemon's counters cannot overflow the scaling multiply.
+        uint64 const tenths =
+            (static_cast<uint64>(failed) * 1000 + attempts / 2) / attempts;
+
+        char buffer[16];
+        snprintf(buffer, sizeof(buffer), "%u.%u%%",
+            static_cast<uint32>(tenths / 10), static_cast<uint32>(tenths % 10));
+        return std::string(buffer);
     }
 }
