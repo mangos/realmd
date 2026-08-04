@@ -54,6 +54,7 @@
 #include "Realm/ClientBuildPolicy.h"
 #include "Realm/RealmList.h"
 #include "AuthSocket.h"
+#include "AccountNameFold.h"
 #include "AuthCodes.h"
 #include "AuthProtocolGuard.h"
 #include "AuthResultPolicy.h"
@@ -544,7 +545,11 @@ bool AuthSocket::_HandleLogonChallenge()
     ///- Read the remaining of the packet
     recv((char*)&buf[4], remaining);
     DEBUG_LOG("[AuthChallenge] got full packet, %#04x bytes", ch->size);
-    DEBUG_LOG("[AuthChallenge] name(%d): '%s'", ch->I_len, ch->I);
+    // Folded and length-bounded: ch->I is remote bytes with no terminator of
+    // its own, and this line runs before _login exists.
+    DEBUG_LOG("[AuthChallenge] name(%d): '%s'", ch->I_len,
+        MaNGOS::Realmd::FoldAccountName(std::string(
+            reinterpret_cast<char const*>(ch->I), ch->I_len)).c_str());
 
     // BigEndian code, nop in little endian case
     // size already converted
@@ -559,6 +564,7 @@ bool AuthSocket::_HandleLogonChallenge()
     ByteBuffer pkt;
 
     _login.assign(reinterpret_cast<char const*>(ch->I), ch->I_len);
+    _displaylogin = MaNGOS::Realmd::FoldAccountName(_login);
     _build = ch->build;
     _os = (const char*)ch->os;
 
@@ -606,7 +612,7 @@ bool AuthSocket::_HandleLogonChallenge()
             bool locked = false;
             if ((*result)[2].GetUInt8() == 1)               // if ip is locked
             {
-                DEBUG_LOG("[AuthChallenge] Account '%s' is locked to IP - '%s'", _login.c_str(), (*result)[3].GetString());
+                DEBUG_LOG("[AuthChallenge] Account '%s' is locked to IP - '%s'", _displaylogin.c_str(), (*result)[3].GetString());
                 DEBUG_LOG("[AuthChallenge] Player address is '%s'", get_remote_address().c_str());
                 if (strcmp((*result)[3].GetString(), get_remote_address().c_str()))
                 {
@@ -622,7 +628,7 @@ bool AuthSocket::_HandleLogonChallenge()
             }
             else
             {
-                DEBUG_LOG("[AuthChallenge] Account '%s' is not locked to ip", _login.c_str());
+                DEBUG_LOG("[AuthChallenge] Account '%s' is not locked to ip", _displaylogin.c_str());
             }
 
             if (!locked)
@@ -635,12 +641,12 @@ bool AuthSocket::_HandleLogonChallenge()
                     if ((*banresult)[0].GetUInt64() == (*banresult)[1].GetUInt64())
                     {
                         pkt << (uint8) WOW_FAIL_BANNED;
-                        BASIC_LOG("[AuthChallenge] Banned account %s tries to login!", _login.c_str());
+                        BASIC_LOG("[AuthChallenge] Banned account %s tries to login!", _displaylogin.c_str());
                     }
                     else
                     {
                         pkt << (uint8) WOW_FAIL_SUSPENDED;
-                        BASIC_LOG("[AuthChallenge] Temporarily banned account %s tries to login!", _login.c_str());
+                        BASIC_LOG("[AuthChallenge] Temporarily banned account %s tries to login!", _displaylogin.c_str());
                     }
 
                     delete banresult;
@@ -719,7 +725,7 @@ bool AuthSocket::_HandleLogonChallenge()
                         _localizationName[i] = ch->country[4 - i - 1];
                     }
 
-                    BASIC_LOG("[AuthChallenge] account %s is using '%c%c%c%c' locale (%u)", _login.c_str(), ch->country[3], ch->country[2], ch->country[1], ch->country[0], GetLocaleByName(_localizationName));
+                    BASIC_LOG("[AuthChallenge] account %s is using '%c%c%c%c' locale (%u)", _displaylogin.c_str(), ch->country[3], ch->country[2], ch->country[1], ch->country[0], GetLocaleByName(_localizationName));
 
                     _status = STATUS_LOGON_PROOF;
                 }
@@ -827,7 +833,7 @@ bool AuthSocket::_HandleLogonProof()
     ///- Check if SRP6 results match (password is correct), else send an error
     if (!memcmp(M.AsByteArray(), lp.M1, 20))
     {
-        BASIC_LOG("User '%s' successfully authenticated", _login.c_str());
+        BASIC_LOG("User '%s' successfully authenticated", _displaylogin.c_str());
 
         bool const supported = FindBuildInfo(_build) != nullptr;
         if (_patchPolicy.ShouldPatch(_build, supported))
@@ -857,7 +863,7 @@ bool AuthSocket::_HandleLogonProof()
         {
             sLog.outError(
                 "[Auth] Failed to publish session key for account %s",
-                _login.c_str());
+                _displaylogin.c_str());
             OPENSSL_free(const_cast<char*>(K_hex));
             close_connection();
             return false;
@@ -890,7 +896,7 @@ bool AuthSocket::_HandleLogonProof()
             char data[2] = { CMD_AUTH_LOGON_PROOF, WOW_FAIL_UNKNOWN_ACCOUNT};
             send(data, sizeof(data));
         }
-        BASIC_LOG("[AuthChallenge] account %s tried to login with wrong password!", _login.c_str());
+        BASIC_LOG("[AuthChallenge] account %s tried to login with wrong password!", _displaylogin.c_str());
 
         uint32 MaxWrongPassCount = sConfig.GetIntDefault("WrongPass.MaxCount", 0);
         if (MaxWrongPassCount > 0)
@@ -914,7 +920,7 @@ bool AuthSocket::_HandleLogonProof()
                         LoginDatabase.PExecute("INSERT INTO `account_banned` VALUES ('%u',UNIX_TIMESTAMP(),UNIX_TIMESTAMP()+'%u','MaNGOS realmd','Failed login autoban',1)",
                             acc_id, WrongPassBanTime);
                         BASIC_LOG("[AuthChallenge] account %s got banned for '%u' seconds because it failed to authenticate '%u' times",
-                            _login.c_str(), WrongPassBanTime, failed_logins);
+                            _displaylogin.c_str(), WrongPassBanTime, failed_logins);
                     }
                     else
                     {
@@ -923,7 +929,7 @@ bool AuthSocket::_HandleLogonProof()
                         LoginDatabase.PExecute("INSERT INTO `ip_banned` VALUES ('%s',UNIX_TIMESTAMP(),UNIX_TIMESTAMP()+'%u','MaNGOS realmd','Failed login autoban')",
                             current_ip.c_str(), WrongPassBanTime);
                         BASIC_LOG("[AuthChallenge] IP %s got banned for '%u' seconds because account %s failed to authenticate '%u' times",
-                            current_ip.c_str(), WrongPassBanTime, _login.c_str(), failed_logins);
+                            current_ip.c_str(), WrongPassBanTime, _displaylogin.c_str(), failed_logins);
                     }
                 }
                 delete loginfail;
@@ -968,9 +974,14 @@ bool AuthSocket::_HandleReconnectChallenge()
     ///- Read the remaining of the packet
     recv((char*)&buf[4], remaining);
     DEBUG_LOG("[ReconnectChallenge] got full packet, %#04x bytes", ch->size);
-    DEBUG_LOG("[ReconnectChallenge] name(%d): '%s'", ch->I_len, ch->I);
+    // Folded and length-bounded, as above. This is the remotely reachable
+    // path: a reconnect challenge needs no prior authentication.
+    DEBUG_LOG("[ReconnectChallenge] name(%d): '%s'", ch->I_len,
+        MaNGOS::Realmd::FoldAccountName(std::string(
+            reinterpret_cast<char const*>(ch->I), ch->I_len)).c_str());
 
     _login.assign(reinterpret_cast<char const*>(ch->I), ch->I_len);
+    _displaylogin = MaNGOS::Realmd::FoldAccountName(_login);
 
     _safelogin = _login;
     LoginDatabase.escape_string(_safelogin);
@@ -992,7 +1003,7 @@ bool AuthSocket::_HandleReconnectChallenge()
     // Stop if the account is not found
     if (!result)
     {
-        sLog.outError("[ERROR] user %s tried to login and we can not find his session key in the database.", _login.c_str());
+        sLog.outError("[ERROR] user %s tried to login and we can not find his session key in the database.", _displaylogin.c_str());
         close_connection();
         return false;
     }
@@ -1064,7 +1075,7 @@ bool AuthSocket::_HandleReconnectProof()
     }
     else
     {
-        sLog.outError("[ERROR] user %s tried to login, but session invalid.", _login.c_str());
+        sLog.outError("[ERROR] user %s tried to login, but session invalid.", _displaylogin.c_str());
         close_connection();
         return false;
     }
@@ -1129,7 +1140,7 @@ bool AuthSocket::_HandleRealmList()
     QueryResult* result = LoginDatabase.PQuery("SELECT `id`,`sha_pass_hash` FROM `account` WHERE `username` = '%s'", _safelogin.c_str());
     if (!result)
     {
-        sLog.outError("[ERROR] user %s tried to login and we can not find him in the database.", _login.c_str());
+        sLog.outError("[ERROR] user %s tried to login and we can not find him in the database.", _displaylogin.c_str());
         close_connection();
         return false;
     }

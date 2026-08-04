@@ -1,4 +1,5 @@
 #include "Console/RealmdStatus.h"
+#include "Auth/AccountNameFold.h"
 #include "Console/RealmdConsole.h"
 #include "Realm/RealmSnapshot.h"
 
@@ -6,6 +7,7 @@
 #include <iostream>
 #include <string>
 
+using MaNGOS::Realmd::FoldAccountName;
 using MaNGOS::Realmd::ApplyRealmSnapshot;
 using MaNGOS::Realmd::RealmdStatus;
 using MaNGOS::Realmd::FormatRelativeAge;
@@ -213,6 +215,41 @@ void TestHeaderRightDatabaseStates()
     CHECK_EQ(FormatHeaderRight(unbound),
         "0.0.0.0:3724 \xC2\xB7 DB \xE2\x80\x94 \xC2\xB7 up 0d 00:00:00");
 }
+
+void TestAccountNameFolding()
+{
+    // Ordinary names are untouched.
+    CHECK_EQ(FoldAccountName("ADMIN"), "ADMIN");
+    CHECK_EQ(FoldAccountName(""), "");
+
+    // Escape introducers cannot survive into a log line.
+    CHECK_EQ(FoldAccountName("\x1b[2J"), "?[2J");
+    CHECK_EQ(FoldAccountName("A\x7f" "B"), "A?B");
+
+    // Wide characters are the real hazard: two terminal cells, one code
+    // point. One '?' per code point, not per byte.
+    CHECK_EQ(FoldAccountName("\xE4\xB8\xAD\xE6\x96\x87"), "??");
+    CHECK_EQ(FoldAccountName("A\xF0\x9F\x92\x80" "B"), "A?B");
+    CHECK_EQ(FoldAccountName("\xC3\x85NGSTROM"), "?NGSTROM");
+
+    // Truncated and stray sequences must still terminate.
+    CHECK_EQ(FoldAccountName("A\xC3"), "A?");
+    CHECK_EQ(FoldAccountName("\x80\x80"), "??");
+
+    // A lead byte whose promised continuation never arrives consumes ONE byte,
+    // not the length its introducer claimed. C3 41 is remotely reachable and
+    // must not swallow the 'A'.
+    CHECK_EQ(FoldAccountName("\xC3" "A"), "?A");
+    CHECK_EQ(FoldAccountName("\xE4\xB8" "Z"), "??Z");
+
+    // Overlong two-byte encoding (C0 AF is the classic overlong '/'): C0 is
+    // not a legal lead at all, so it folds as one stray byte and the AF that
+    // follows folds as another.
+    CHECK_EQ(FoldAccountName("\xC0\xAF"), "??");
+
+    // Lead byte outside the encodable range (> U+10FFFF).
+    CHECK_EQ(FoldAccountName("\xF5\x80"), "??");
+}
 }
 
 int main()
@@ -228,6 +265,7 @@ int main()
     TestLogonsField();
     TestActivityLineTracksPatchTransfers();
     TestHeaderRightDatabaseStates();
+    TestAccountNameFolding();
     if (failures != 0)
     {
         std::cerr << failures << " realmd console check(s) failed\n";

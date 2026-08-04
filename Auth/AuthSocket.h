@@ -227,6 +227,10 @@ class AuthSocket: public net::ISession
 
         std::string _login; /**< TODO */
         std::string _safelogin; /**< TODO */
+        /// _login folded to printable ASCII. The only form that may reach the
+        /// logger: the raw name is remote input and the console frame counts
+        /// code points, not display cells.
+        std::string _displaylogin;
 
         std::string _localizationName; /**< Since GetLocaleByName() is _NOT_ bijective, we have to store the locale as a string. Otherwise we can't differ between enUS and enGB, which is important for the patch system */
         std::string _os;
