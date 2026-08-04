@@ -269,6 +269,7 @@ if(WITH_TESTS OR BUILD_TESTING)
     # src/CMakeLists.txt:65-73 cannot be extended from inside this submodule.
     add_executable(realmd_console_tests
         Tests/RealmdConsoleTests.cpp
+        Console/RealmdStatus.cpp
     )
     target_compile_features(realmd_console_tests PUBLIC cxx_std_17)
     set_target_properties(realmd_console_tests PROPERTIES CXX_EXTENSIONS OFF)

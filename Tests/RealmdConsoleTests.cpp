@@ -1,9 +1,11 @@
 #include "Console/RealmdStatus.h"
+#include "Realm/RealmSnapshot.h"
 
 #include <cstdlib>
 #include <iostream>
 #include <string>
 
+using MaNGOS::Realmd::ApplyRealmSnapshot;
 using MaNGOS::Realmd::RealmdStatus;
 
 namespace
@@ -65,11 +67,63 @@ void TestDefaultStatusIsZeroed()
     CHECK(status.churn.empty());
     CHECK(status.scheduledExit.empty());
 }
+
+void AddRealm(RealmSnapshot& snapshot, std::string const& name, RealmFlags flags)
+{
+    Realm& realm = snapshot.realms[name];
+    realm.name = name;
+    realm.realmflags = flags;
+}
+
+void TestRealmSnapshotSummary()
+{
+    RealmSnapshot snapshot;
+    AddRealm(snapshot, "One", REALM_FLAG_NONE);
+    AddRealm(snapshot, "Two", REALM_FLAG_OFFLINE);
+    AddRealm(snapshot, "Three", REALM_FLAG_RECOMMENDED);
+    snapshot.publishedAt = 1000;
+
+    RealmdStatus status;
+    ApplyRealmSnapshot(snapshot, 1185, status);
+
+    CHECK(status.realmsTotal == 3);
+    CHECK(status.realmsOnline == 2);
+    CHECK(status.snapshotPublished);
+    CHECK(status.snapshotAgeSeconds == 185);
+}
+
+void TestUnpublishedSnapshotHasNoAge()
+{
+    RealmSnapshot snapshot;
+
+    RealmdStatus status;
+    ApplyRealmSnapshot(snapshot, 1185, status);
+
+    CHECK(status.realmsTotal == 0);
+    CHECK(status.realmsOnline == 0);
+    CHECK(!status.snapshotPublished);
+    CHECK(status.snapshotAgeSeconds == 0);
+}
+
+void TestSnapshotAgeIgnoresBackwardsClock()
+{
+    RealmSnapshot snapshot;
+    snapshot.publishedAt = 2000;
+
+    RealmdStatus status;
+    ApplyRealmSnapshot(snapshot, 1000, status);
+
+    CHECK(status.snapshotPublished);
+    CHECK(status.snapshotAgeSeconds == 0);
+}
 }
 
 int main()
 {
     TestDefaultStatusIsZeroed();
+    TestRealmSnapshotSummary();
+    TestUnpublishedSnapshotHasNoAge();
+    TestSnapshotAgeIgnoresBackwardsClock();
 
     if (failures != 0)
     {

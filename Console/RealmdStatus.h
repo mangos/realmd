@@ -30,7 +30,9 @@
 #define MANGOS_H_REALMDSTATUS
 
 #include "Platform/Define.h"
+#include "Realm/RealmSnapshot.h"
 
+#include <ctime>
 #include <string>
 
 namespace MaNGOS::Realmd
@@ -113,6 +115,21 @@ namespace MaNGOS::Realmd
         /// re-declare it.
         std::string scheduledExit;
     };
+
+    /**
+     * @brief Fill the realm members of @p status from a published snapshot.
+     *
+     * Reads only; it never refreshes. A snapshot whose publishedAt is zero was
+     * never built from the database, and reports as unpublished with no age. A
+     * clock that has moved backwards yields an age of zero rather than a
+     * wrapped unsigned value.
+     *
+     * @param snapshot the generation to summarise
+     * @param now      current wall-clock time, in the same epoch as publishedAt
+     * @param status   the aggregate whose realm members are overwritten
+     */
+    void ApplyRealmSnapshot(
+        RealmSnapshot const& snapshot, time_t now, RealmdStatus& status);
 }
 
 #endif
