@@ -1,4 +1,5 @@
 #include "Console/RealmdStatus.h"
+#include "Console/RealmdConsole.h"
 #include "Realm/RealmSnapshot.h"
 
 #include <cstdlib>
@@ -7,6 +8,12 @@
 
 using MaNGOS::Realmd::ApplyRealmSnapshot;
 using MaNGOS::Realmd::RealmdStatus;
+using MaNGOS::Realmd::FormatRelativeAge;
+using MaNGOS::Realmd::FormatUptime;
+using MaNGOS::Realmd::FormatRealms;
+using MaNGOS::Realmd::FormatLogons;
+using MaNGOS::Realmd::FormatActivity;
+using MaNGOS::Realmd::FormatHeaderRight;
 
 namespace
 {
@@ -116,6 +123,96 @@ void TestSnapshotAgeIgnoresBackwardsClock()
     CHECK(status.snapshotPublished);
     CHECK(status.snapshotAgeSeconds == 0);
 }
+
+void TestRelativeAgeBuckets()
+{
+    CHECK_EQ(FormatRelativeAge(0), "0s ago");
+    CHECK_EQ(FormatRelativeAge(59), "59s ago");
+    CHECK_EQ(FormatRelativeAge(60), "1m ago");
+    CHECK_EQ(FormatRelativeAge(185), "3m ago");
+    CHECK_EQ(FormatRelativeAge(3599), "59m ago");
+    CHECK_EQ(FormatRelativeAge(7500), "2h ago");
+    CHECK_EQ(FormatRelativeAge(86399), "23h ago");
+    CHECK_EQ(FormatRelativeAge(200000), "2d ago");
+}
+
+void TestUptimeFormatting()
+{
+    CHECK_EQ(FormatUptime(0), "0d 00:00:00");
+    CHECK_EQ(FormatUptime(62), "0d 00:01:02");
+    CHECK_EQ(FormatUptime(273112), "3d 03:51:52");
+}
+
+void TestRealmsField()
+{
+    RealmdStatus status;
+    status.realmsTotal = 5;
+    status.realmsOnline = 4;
+    status.snapshotPublished = true;
+    status.snapshotAgeSeconds = 185;
+    CHECK_EQ(FormatRealms(status), "4/5 \xC2\xB7 3m ago");
+
+    RealmdStatus never;
+    CHECK_EQ(FormatRealms(never), "0/0 \xC2\xB7 never");
+}
+
+void TestLogonsField()
+{
+    RealmdStatus status;
+    status.logonsOk = 1247;
+    status.logonsFailedRejected = 21;
+    status.logonsFailedBadProof = 12;
+    status.logonsFailedBuild = 4;
+    CHECK_EQ(FormatLogons(status), "1284 / 37 fail");
+
+    RealmdStatus idle;
+    CHECK_EQ(FormatLogons(idle), "0 / 0 fail");
+}
+
+void TestActivityLineTracksPatchTransfers()
+{
+    // The only field in the whole status set that is not a status slot: it is
+    // written to SetActivity, and it is what proves ActivePatchTransfers() is
+    // wired into the gather rather than left at zero forever.
+    RealmdStatus idle;
+    CHECK_EQ(FormatActivity(idle), "");
+
+    RealmdStatus one;
+    one.patchTransfersActive = 1;
+    CHECK_EQ(FormatActivity(one), "1 patch transfer");
+
+    RealmdStatus many;
+    many.patchTransfersActive = 7;
+    CHECK_EQ(FormatActivity(many), "7 patch transfers");
+}
+
+void TestHeaderRightDatabaseStates()
+{
+    RealmdStatus unprobed;
+    unprobed.bindIp = "0.0.0.0";
+    unprobed.port = 3724;
+    unprobed.uptimeSeconds = 62;
+    CHECK_EQ(FormatHeaderRight(unprobed),
+        "0.0.0.0:3724 \xC2\xB7 DB \xE2\x80\x94 \xC2\xB7 up 0d 00:01:02");
+
+    RealmdStatus healthy = unprobed;
+    healthy.dbProbed = true;
+    healthy.dbOk = true;
+    healthy.dbLatencyMs = 4;
+    healthy.uptimeSeconds = 273112;
+    CHECK_EQ(FormatHeaderRight(healthy),
+        "0.0.0.0:3724 \xC2\xB7 DB ok 4ms \xC2\xB7 up 3d 03:51:52");
+
+    RealmdStatus broken = unprobed;
+    broken.dbProbed = true;
+    CHECK_EQ(FormatHeaderRight(broken),
+        "0.0.0.0:3724 \xC2\xB7 DB down \xC2\xB7 up 0d 00:01:02");
+
+    RealmdStatus unbound;
+    unbound.port = 3724;
+    CHECK_EQ(FormatHeaderRight(unbound),
+        "0.0.0.0:3724 \xC2\xB7 DB \xE2\x80\x94 \xC2\xB7 up 0d 00:00:00");
+}
 }
 
 int main()
@@ -125,6 +222,12 @@ int main()
     TestUnpublishedSnapshotHasNoAge();
     TestSnapshotAgeIgnoresBackwardsClock();
 
+    TestRelativeAgeBuckets();
+    TestUptimeFormatting();
+    TestRealmsField();
+    TestLogonsField();
+    TestActivityLineTracksPatchTransfers();
+    TestHeaderRightDatabaseStates();
     if (failures != 0)
     {
         std::cerr << failures << " realmd console check(s) failed\n";

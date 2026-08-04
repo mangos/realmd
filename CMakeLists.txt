@@ -270,6 +270,7 @@ if(WITH_TESTS OR BUILD_TESTING)
     add_executable(realmd_console_tests
         Tests/RealmdConsoleTests.cpp
         Console/RealmdStatus.cpp
+        Console/RealmdConsole.cpp
     )
     target_compile_features(realmd_console_tests PUBLIC cxx_std_17)
     set_target_properties(realmd_console_tests PROPERTIES CXX_EXTENSIONS OFF)

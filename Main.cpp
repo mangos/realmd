@@ -57,6 +57,8 @@
 #include "Auth/AuthServer.h"
 #include "Auth/PatchTransferCounter.h"
 #include "Console/ConsoleLifecycle.h"
+#include "Console/RealmdConsole.h"
+#include "Console/StatusSource.h"
 #include "SystemConfig.h"
 #include "ScheduledExit.h"
 #include "Util.h"
@@ -622,6 +624,13 @@ extern int main(int argc, char** argv)
     uint32 numLoops = (sConfig.GetIntDefault("MaxPingTime", 30) * (MINUTE * 1000000 / 100000));
     uint32 loopCounter = 0;
     uint32 logFlushCounter = 0;
+    uint32 statusUpdateCounter = 0;
+
+    // Uptime is measured from here: the listener is bound, the database is up
+    // and the console is running, so this is the moment realmd began serving.
+    // Not const: StatusSource::Gather is non-const by design and stays so.
+    MaNGOS::Realmd::StatusSource statusSource(
+        bindIp, rmport, patchServing, time(NULL));
 
 #ifndef WIN32
     detachDaemon();
@@ -652,6 +661,16 @@ extern int main(int argc, char** argv)
         // discarded and the call exists only to stop keystrokes typed during
         // the run being replayed into the operator's shell after exit.
         console.DrainInput();
+
+        // Once a second: ten iterations of the 100 ms housekeeping loop. The
+        // console writer repaints on its own roughly every 5 ms, so nothing
+        // here has to call Render(). Published last in the tick so the status
+        // row reflects anything logged earlier on the same iteration.
+        if ((++statusUpdateCounter) >= 10)
+        {
+            statusUpdateCounter = 0;
+            MaNGOS::Realmd::PublishStatus(statusSource.Gather(time(NULL)));
+        }
 #ifdef _WIN32
         static uint32 titleUpdateCounter = 0;
         if ((++titleUpdateCounter) >= 30) // ~3 seconds at 100ms reactor interval
