@@ -238,6 +238,13 @@ class AuthSocket: public net::ISession
         /// code points, not display cells.
         std::string _displaylogin;
 
+        /// ASCII-folded form of _localizationName, for logging only. The
+        /// four locale bytes are client-controlled and unvalidated, exactly
+        /// like the account name, so they get the same treatment before they
+        /// can reach a console frame. _localizationName itself stays raw:
+        /// it is protocol data and the patch-archive filename depends on it.
+        std::string _displaylocale;
+
         std::string _localizationName; /**< Since GetLocaleByName() is _NOT_ bijective, we have to store the locale as a string. Otherwise we can't differ between enUS and enGB, which is important for the patch system */
         std::string _os;
         PatchPolicy _patchPolicy;

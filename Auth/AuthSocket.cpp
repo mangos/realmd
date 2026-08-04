@@ -734,7 +734,10 @@ bool AuthSocket::_HandleLogonChallenge()
                         _localizationName[i] = ch->country[4 - i - 1];
                     }
 
-                    BASIC_LOG("[AuthChallenge] account %s is using '%c%c%c%c' locale (%u)", _displaylogin.c_str(), ch->country[3], ch->country[2], ch->country[1], ch->country[0], GetLocaleByName(_localizationName));
+                    _displaylocale =
+                        MaNGOS::Realmd::FoldAccountName(_localizationName);
+
+                    BASIC_LOG("[AuthChallenge] account %s is using '%s' locale (%u)", _displaylogin.c_str(), _displaylocale.c_str(), GetLocaleByName(_localizationName));
 
                     _status = STATUS_LOGON_PROOF;
                 }
@@ -1406,7 +1409,7 @@ bool AuthSocket::BeginPatchStream(uint64 startOffset)
             "[Patch] rejected transfer offset %llu for build %u locale %s",
             static_cast<unsigned long long>(startOffset),
             _build,
-            _localizationName.c_str());
+            _displaylocale.c_str());
         close_connection();
         return false;
     }
