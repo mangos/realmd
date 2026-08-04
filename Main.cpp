@@ -55,6 +55,8 @@
 #include "Auth/PatchPolicy.h"
 #include "Auth/AuthSocket.h"
 #include "Auth/AuthServer.h"
+#include "Auth/PatchTransferCounter.h"
+#include "Console/ConsoleLifecycle.h"
 #include "SystemConfig.h"
 #include "ScheduledExit.h"
 #include "Util.h"
@@ -117,6 +119,16 @@ namespace
 {
     uint8 const REALMD_SHUTDOWN_EXIT_CODE = 0;
     uint8 const REALMD_RESTART_EXIT_CODE = 2;
+
+    /// Longest realmd waits at shutdown for detached patch transfers to
+    /// finish, AFTER authServer.Stop() has disarmed their send channels --
+    /// which is what releases one parked on backpressure. Bounded so a stalled
+    /// client can never hang the shutdown, and comfortably longer than the one
+    /// second a freshly accepted transfer sleeps before it can even look at
+    /// flow control (Auth/PatchHandler.cpp:75). On expiry the console writer
+    /// thread is deliberately left running and the process leaves without
+    /// static destruction.
+    std::chrono::seconds const REALMD_PATCH_DRAIN_TIMEOUT{5};
 
     MaNGOS::ScheduledExitSchedule s_scheduledExit;
     MaNGOS::ScheduledExitState s_scheduledExitState;
@@ -518,6 +530,34 @@ extern int main(int argc, char** argv)
     ///- Catch termination signals
     HookSignals();
 
+    ///- Take over the terminal, and give it back on every exit path
+    //
+    // The placement of this line is load-bearing, not stylistic. It must be
+    // here, and not near sLog.Initialize() at line 406, for three independent
+    // reasons:
+    //
+    // 1. Log::WaitBeforeContinueIfNeed bypasses the console entirely: raw
+    //    printf plus std::getline(std::cin, ...). realmd calls it at lines 422,
+    //    433, 445, 455, 464 and 514. Started above those, any one of the six
+    //    error paths prints invisibly and then blocks on stdin underneath the
+    //    alternate screen -- a daemon that looks hung.
+    // 2. Six early "return 1" paths (434, 446, 456, 465, 502 and 515) sit above
+    //    this line. Starting the console above them means exiting through them
+    //    with the terminal taken over and never restored.
+    // 3. startDaemon() forks at line 398. A thread started before a fork does
+    //    not survive it.
+    //
+    // Constructing this does NOT necessarily start anything: for
+    // Console.Style = "plain", for a service, for a daemon and for any
+    // redirected run it takes no terminal and starts no thread.
+    //
+    // From here on ONE rule governs every exit: unless every console log
+    // producer has been proven quiesced, realmd restores the terminal and
+    // leaves the process from inside the guard rather than reaching static
+    // destruction. The guard enforces that from its destructor, so a "return"
+    // added below this line is safe -- it just will not run static destructors.
+    MaNGOS::Realmd::ConsoleLifecycle console;
+
     ///- Handle affinity for multiple processors and process priority on Windows
 #ifdef WIN32
     {
@@ -601,6 +641,11 @@ extern int main(int argc, char** argv)
         }
 
         CheckScheduledExit();
+
+        // Not a command loop. See ConsoleLifecycle::DrainInput(): the result is
+        // discarded and the call exists only to stop keystrokes typed during
+        // the run being replayed into the operator's shell after exit.
+        console.DrainInput();
 #ifdef _WIN32
         static uint32 titleUpdateCounter = 0;
         if ((++titleUpdateCounter) >= 30) // ~3 seconds at 100ms reactor interval
@@ -621,18 +666,108 @@ extern int main(int argc, char** argv)
 #endif
     }
 
-    ///- Stop accepting connections and join the network worker threads
-    authServer.Stop();
+    ///- The proof that every console log producer has quiesced. It DEFAULTS to
+    ///- false and is raised only by a drain that actually succeeded, so no
+    ///- path out of the block below can leave it optimistically true.
+    bool transfersDrained = false;
 
-    ///- Wait for the delay thread to exit
-    LoginDatabase.HaltDelayThread();
+    ///- The whole shutdown is enclosed, because the emergency route has to be
+    ///- non-throwing END TO END and everything here can throw: Stop() joins
+    ///- threads, the cancellation reaches transport callbacks, the drain waits
+    ///- on a condition variable, the diagnostic formats a string,
+    ///- HaltDelayThread() talks to MySQL and Flush() walks the log buffers. An
+    ///- exception escaping any of them would unwind past the guard's Finish()
+    ///- with the producers unproven -- and on MSVC an exception that escapes
+    ///- main terminates WITHOUT unwinding, so the guard's destructor is not a
+    ///- substitute for this catch.
+    try
+    {
+        ///- Stop accepting connections and join the network worker threads.
+        ///- This is also what releases a patch transfer parked on
+        ///- backpressure: the transport's stop() tears every connection down
+        ///- and the tear-down disarms the send channel, whose out.close()
+        ///- wakes the producer so its flow->awaitWritable() returns false and
+        ///- the closure returns instead of reaching its error log.
+        authServer.Stop();
 
-    ///- Remove signal handling before leaving
+        ///- Best-effort cleanup on top of that stop, for a transfer that is
+        ///- already disarmed by Stop(), so this call has no transport effect
+        ///- on any of the three backends. It is NOT what unblocks a parked
+        ///- producer: a
+        ///- net::Closer records graceful-close intent, and the connection is
+        ///- closed only once its outbound queue has drained -- which never
+        ///- happens against a peer that has stopped reading.
+        ///-
+        ///- It must stay BELOW authServer.Stop(). IOCP's requestClose()
+        ///- dereferences a raw connection context after releasing the channel
+        ///- mutex, so a concurrent disarm can retire that context underneath
+        ///- it; this call is safe only because every channel is already
+        ///- disarmed by the time it runs.
+        MaNGOS::Realmd::CancelPatchTransfers();
+
+        ///- Then wait for the detached streaming closures to be gone. They are
+        ///- console log producers that nothing joins, and the wait is bounded
+        ///- so a stalled client can never hang the shutdown.
+        transfersDrained =
+            MaNGOS::Realmd::DrainPatchTransfers(REALMD_PATCH_DRAIN_TIMEOUT);
+
+        if (!transfersDrained)
+        {
+            ///- Diagnostic only, and deliberately best effort: this must not
+            ///- become the thing that throws on the way to the emergency exit.
+            try
+            {
+                sLog.outError("Shutdown: %u patch transfer(s) still running "
+                    "after cancellation; leaving without static destruction so "
+                    "nothing is destroyed under a live log producer",
+                    MaNGOS::Realmd::ActivePatchTransfers());
+            }
+            catch (...)
+            {
+            }
+
+            ///- Straight out from here, without touching anything else. DOES
+            ///- NOT RETURN: the guard restores the terminal and terminates the
+            ///- process with exitCode, running no static destructors, because
+            ///- returning would close the log files and destroy ConsoleUI
+            ///- underneath a producer that is still logging. That is so
+            ///- whether or not a console was ever started -- the writer is not
+            ///- the only producer. The SQL delay thread is halted inside that
+            ///- path, for the same flush the line below performs.
+            console.Finish(false, exitCode);
+        }
+
+        ///- Wait for the delay thread to exit. It joins the last console
+        ///- producer AND flushes the login-DB writes queued through PExecute.
+        LoginDatabase.HaltDelayThread();
+
+        sLog.outString("Halting process...");
+        sLog.Flush();
+
+        ///- Finalise the console: stop the writer, then give the terminal back.
+        ///- Reached only with transfersDrained true, so this is the ordinary
+        ///- path and it returns.
+        console.Finish(transfersDrained, exitCode);
+    }
+    catch (...)
+    {
+        ///- Nothing above got as far as proving the producers quiesced, so the
+        ///- only safe answer is the same emergency route. DOES NOT RETURN.
+        console.Finish(false, exitCode);
+    }
+
+    ///- Remove signal handling only now. The handlers stay installed THROUGH
+    ///- the terminal restoration above, so a Ctrl-C during teardown cannot take
+    ///- the default action with the alternate screen still up and, on POSIX,
+    ///- echo and line editing still switched off. Unhooking earlier -- which is
+    ///- what this file used to do -- reopens exactly that window.
     UnhookSignals();
 
-    sLog.outString("Halting process...");
-    sLog.Flush();
     return exitCode;
+
+    // ~ConsoleLifecycle still runs after this return. It is a no-op now:
+    // Finish() completed, so it simply confirms the terminal is restored. It
+    // remains the backstop for any return added above.
 }
 
 /// Handle termination signals

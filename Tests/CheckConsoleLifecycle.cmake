@@ -239,3 +239,114 @@ if(RESTORE_CATCH LESS RESTORE_STOP OR RESTORE_LEAVE LESS RESTORE_CATCH)
     "RestoreTerminal() order must be: ConsoleUI::Stop(), catch (...), then "
     "Terminal::Leave()")
 endif()
+
+file(READ "${REALMD_SOURCE}/Main.cpp" MAIN_SOURCE)
+
+# The console is owned by the scope guard. A direct call in Main.cpp would be
+# silently defeated by any early return added between the pair, and a second
+# process-exit call would be a second implementation of the invariant -- the
+# thing that has to stay in exactly one place to stay checkable. This matches on
+# text, so a COMMENT quoting the exit call fails it too; that is intentional.
+foreach(FORBIDDEN_TEXT
+    "sLog.StartConsoleThread"
+    "sLog.StopConsoleThread"
+    "ConsoleUI::Instance().Start"
+    "ConsoleUI::Instance().Stop"
+    "std::_Exit")
+  string(FIND "${MAIN_SOURCE}" "${FORBIDDEN_TEXT}" POSITION)
+  if(NOT POSITION EQUAL -1)
+    message(FATAL_ERROR
+      "Main.cpp must not drive the console or process exit directly: "
+      "${FORBIDDEN_TEXT}")
+  endif()
+endforeach()
+
+foreach(REQUIRED_TEXT
+    "MaNGOS::Realmd::ConsoleLifecycle console;"
+    "console.DrainInput();"
+    "MaNGOS::Realmd::CancelPatchTransfers();"
+    "bool transfersDrained = false;"
+    "catch (...)"
+    "console.Finish(false, exitCode);"
+    "console.Finish(transfersDrained, exitCode);")
+  string(FIND "${MAIN_SOURCE}" "${REQUIRED_TEXT}" POSITION)
+  if(POSITION EQUAL -1)
+    message(FATAL_ERROR
+      "Main.cpp is missing required console wiring: ${REQUIRED_TEXT}")
+  endif()
+endforeach()
+
+# Startup placement: below HookSignals(), and below the last
+# Log::WaitBeforeContinueIfNeed site, so none of the six early error paths can
+# print invisibly and block on stdin underneath the alternate screen, and so no
+# thread is started before startDaemon() forks.
+string(FIND "${MAIN_SOURCE}" "    HookSignals();" HOOK_SIGNALS)
+string(FIND "${MAIN_SOURCE}" "MaNGOS::Realmd::ConsoleLifecycle console;"
+  CONSOLE_GUARD)
+string(FIND "${MAIN_SOURCE}" "Log::WaitBeforeContinueIfNeed();" LAST_WAIT
+  REVERSE)
+if(HOOK_SIGNALS EQUAL -1)
+  message(FATAL_ERROR "HookSignals() is no longer where the guard anchors")
+endif()
+if(CONSOLE_GUARD LESS HOOK_SIGNALS OR CONSOLE_GUARD LESS LAST_WAIT)
+  message(FATAL_ERROR
+    "The console guard must be constructed after HookSignals() and after every "
+    "Log::WaitBeforeContinueIfNeed site")
+endif()
+
+# Shutdown order, and the reason for it. authServer.Stop() runs FIRST because it
+# is what actually releases a transfer parked on backpressure: the transport's
+# stop() disarms every send channel and disarm()'s out.close() wakes the
+# producer. CancelPatchTransfers() is cleanup layered on top of that -- a
+# net::Closer records close intent and does not force a close -- and it MUST NOT
+# be hoisted above the stop, because IOCP's requestClose() dereferences a raw
+# ConnCtx* after releasing the channel mutex (shared/net/iocp/IocpServer.cpp:59-
+# 78) and is safe only against an already-disarmed channel. The drain then
+# proves the producers are gone, and the console is finalised BEFORE
+# UnhookSignals() so the handlers are still installed while the terminal is
+# restored -- a Ctrl-C in that window would otherwise take the default action
+# with the alternate screen still up.
+string(FIND "${MAIN_SOURCE}" "authServer.Stop();" SERVER_STOP)
+string(FIND "${MAIN_SOURCE}" "MaNGOS::Realmd::CancelPatchTransfers();" CANCEL)
+string(FIND "${MAIN_SOURCE}" "MaNGOS::Realmd::DrainPatchTransfers(" DRAIN)
+string(FIND "${MAIN_SOURCE}" "LoginDatabase.HaltDelayThread();" HALT_DB)
+string(FIND "${MAIN_SOURCE}" "console.Finish(transfersDrained, exitCode);"
+  FINISH)
+string(FIND "${MAIN_SOURCE}" "    UnhookSignals();" UNHOOK)
+if(SERVER_STOP EQUAL -1 OR CANCEL EQUAL -1 OR DRAIN EQUAL -1 OR
+   HALT_DB EQUAL -1 OR FINISH EQUAL -1 OR UNHOOK EQUAL -1)
+  message(FATAL_ERROR "The realmd shutdown sequence is incomplete")
+endif()
+if(CANCEL LESS SERVER_STOP OR DRAIN LESS CANCEL OR HALT_DB LESS DRAIN OR
+   FINISH LESS HALT_DB OR UNHOOK LESS FINISH)
+  message(FATAL_ERROR
+    "Shutdown order must be: authServer.Stop, CancelPatchTransfers, "
+    "DrainPatchTransfers, HaltDelayThread, console.Finish, UnhookSignals")
+endif()
+
+# The emergency route has to be non-throwing END TO END, and Main.cpp owns the
+# half of it that runs before the guard is reached. Every step here can throw --
+# authServer.Stop(), the cancellation, the drain, the diagnostic,
+# HaltDelayThread() and sLog.Flush() -- and an exception unwinding past them
+# reaches static destruction with the producers unproven and the terminal still
+# captured. So the whole sequence sits in one try, its catch (...) routes
+# straight to console.Finish(false, exitCode), and the proof itself DEFAULTS to
+# false before the try rather than being assigned inside it.
+#
+# The bound is the LAST catch (...) against console.Finish(transfersDrained,
+# ...): the outer catch has to come after the ordinary Finish() to cover it,
+# and the last Finish(false, ...) has to come after that catch to be its body.
+# Anchoring on the drain instead would be satisfied by the nested best-effort
+# catch around the diagnostic, with the outer try/catch removed entirely.
+string(FIND "${MAIN_SOURCE}" "bool transfersDrained = false;" DRAINED_DEFAULT)
+string(FIND "${MAIN_SOURCE}" "catch (...)" SHUTDOWN_CATCH REVERSE)
+string(FIND "${MAIN_SOURCE}" "console.Finish(false, exitCode);" FINISH_FALSE
+  REVERSE)
+if(DRAINED_DEFAULT GREATER SERVER_STOP OR SHUTDOWN_CATCH LESS FINISH OR
+   FINISH_FALSE LESS SHUTDOWN_CATCH)
+  message(FATAL_ERROR
+    "Main.cpp must declare transfersDrained = false before authServer.Stop(), "
+    "enclose the whole shutdown INCLUDING console.Finish(transfersDrained, "
+    "exitCode) in one try, and route its catch (...) straight to "
+    "console.Finish(false, exitCode)")
+endif()
