@@ -1421,11 +1421,20 @@ bool AuthSocket::OfferPatch()
 {
     std::string const patchFile =
         "./patches/" + std::to_string(_build) + _localizationName + ".mpq";
+
+    // The same path with the locale folded, for logging only. Folding the
+    // four locale bytes at their own log sites was not enough: they reappear
+    // here as part of a filename, and both logs below would otherwise carry
+    // the raw client bytes. Opening the archive must keep the raw form,
+    // because that is the name on disk.
+    std::string const displayFile =
+        "./patches/" + std::to_string(_build) + _displaylocale + ".mpq";
+
     std::unique_ptr<PatchArtifact> artifact = PatchArtifact::Open(patchFile);
     if (!artifact)
     {
         sLog.outError("[Patch] required archive cannot be opened: %s",
-            patchFile.c_str());
+            displayFile.c_str());
         SendInvalidVersion();
         return true;
     }
@@ -1450,7 +1459,7 @@ bool AuthSocket::OfferPatch()
     deactivate_auth_deadline();
     DEBUG_LOG(
         "[AuthChallenge] offering patch %s (%llu bytes) to build %u",
-        patchFile.c_str(),
+        displayFile.c_str(),
         static_cast<unsigned long long>(transfer.file_size),
         _build);
     return true;
