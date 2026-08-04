@@ -255,5 +255,10 @@ std::shared_ptr<RealmSnapshot> RealmList::BuildSnapshot(bool init)
         delete result;
     }
 
+    // Stamped after the query rather than before it: the age the console
+    // reports is the age of the data, and a slow query is exactly when that
+    // distinction matters.
+    snapshot->publishedAt = time(NULL);
+
     return snapshot;
 }

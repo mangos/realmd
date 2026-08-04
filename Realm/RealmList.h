@@ -63,6 +63,22 @@ class RealmList
         {
             return static_cast<uint32>(m_snapshots.Load()->realms.size());
         }
+
+        /**
+         * @brief The snapshot most recently published, without refreshing it.
+         *
+         * For observers such as the console status pane. It never runs a
+         * database query and never resolves a realm address, so it is safe on
+         * the housekeeping thread; UpdateIfNeed() is not, because its refresh
+         * lambda runs inside the gate's lock and calls getaddrinfo() up to
+         * three times per realm row with no timeout.
+         *
+         * @return the current immutable snapshot, never null
+         */
+        RealmSnapshotStore::SnapshotPtr GetSnapshot() const
+        {
+            return m_snapshots.Load();
+        }
     private:
         /**
          * Checks what version (ie, vanilla, tbc) a certain build number belongs to

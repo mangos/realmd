@@ -514,6 +514,12 @@ extern int main(int argc, char** argv)
         return 1;
     }
 
+
+    // Read before std::move(*patchPolicy) below hands the policy to
+    // AuthServer: the console reports whether patch serving is on, and a
+    // moved-from policy must never be consulted for it.
+    bool const patchServing = patchPolicy->Enabled();
+
     AuthServer authServer;
 
     if (!authServer.Start(

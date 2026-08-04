@@ -32,6 +32,17 @@ public:
             (!supported || m_forcedBuilds.count(build) != 0);
     }
 
+    /**
+     * @return true when patch serving is enabled by configuration
+     *
+     * Reported by the console status pane. Read it before the policy is moved
+     * into AuthServer; a moved-from policy is not a source of truth.
+     */
+    bool Enabled() const
+    {
+        return m_enabled;
+    }
+
 private:
     bool m_enabled = true;
     std::set<std::uint16_t> m_forcedBuilds;

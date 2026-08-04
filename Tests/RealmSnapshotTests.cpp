@@ -52,6 +52,12 @@ void TestViewRetainsPublishedGeneration()
     CHECK((*newView.begin())->name == "Second");
 }
 
+void TestPublishedAtSurvivesPublication()
+{
+    RealmSnapshotStore store;
+    CHECK(store.Load()->publishedAt == 0);
+}
+
 void TestConcurrentPublicationIsConsistent()
 {
     RealmSnapshotStore store;
@@ -166,6 +172,7 @@ void TestRefreshGateDoesNotBlockOtherCallers()
 int main()
 {
     TestViewRetainsPublishedGeneration();
+    TestPublishedAtSurvivesPublication();
     TestConcurrentPublicationIsConsistent();
     TestRefreshGateAdmitsOneCaller();
     TestRefreshGateDoesNotBlockOtherCallers();

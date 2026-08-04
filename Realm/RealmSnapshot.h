@@ -82,6 +82,11 @@ struct RealmSnapshot
 {
     RealmMap realms;
     std::array<RealmStlList, REALM_VERSION_COUNT> realmsByVersion;
+    /// When BuildSnapshot() finished reading the realmlist table. Zero on the
+    /// empty snapshot RealmSnapshotStore is constructed with, which was never
+    /// built from the database -- observers report that as "never" rather than
+    /// an age measured from the epoch.
+    time_t publishedAt = 0;
 };
 
 class RealmSnapshotStore
