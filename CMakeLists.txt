@@ -30,6 +30,10 @@ source_group("Authentication" FILES ${SRC_GRP_AUTH})
 file(GLOB_RECURSE SRC_GRP_REALM Realm/*.cpp Realm/*.h)
 source_group("Realmlist" FILES ${SRC_GRP_REALM})
 
+#Console Files
+file(GLOB_RECURSE SRC_GRP_CONSOLE Console/*.cpp Console/*.h)
+source_group("Console" FILES ${SRC_GRP_CONSOLE})
+
 
 configure_file(realmd.conf.dist.in ${CMAKE_CURRENT_BINARY_DIR}/realmd.conf.dist)
 
@@ -43,6 +47,7 @@ endif()
 add_executable(realmd
     ${SRC_GRP_AUTH}
     ${SRC_GRP_REALM}
+    ${SRC_GRP_CONSOLE}
     Main.cpp
     $<$<BOOL:${WIN32}>:
         ${CMAKE_CURRENT_BINARY_DIR}/VersionInfo.h
@@ -248,4 +253,10 @@ if(WITH_TESTS OR BUILD_TESTING)
     )
     add_test(NAME realmd_patch_transfer_counter_tests
         COMMAND realmd_patch_transfer_counter_tests)
+
+    add_test(NAME realmd_console_lifecycle
+        COMMAND ${CMAKE_COMMAND}
+            -DREALMD_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CheckConsoleLifecycle.cmake
+    )
 endif()
