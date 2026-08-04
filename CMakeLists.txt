@@ -283,4 +283,20 @@ if(WITH_TESTS OR BUILD_TESTING)
         Threads::Threads
     )
     add_test(NAME realmd_console_tests COMMAND realmd_console_tests)
+
+
+    add_executable(realmd_auth_counter_tests
+        Tests/AuthCounterTests.cpp
+        Auth/AuthCounters.cpp
+    )
+    target_compile_features(realmd_auth_counter_tests PUBLIC cxx_std_17)
+    set_target_properties(realmd_auth_counter_tests PROPERTIES CXX_EXTENSIONS OFF)
+    target_include_directories(realmd_auth_counter_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(realmd_auth_counter_tests PRIVATE
+        shared
+        Threads::Threads
+    )
+    add_test(NAME realmd_auth_counter_tests COMMAND realmd_auth_counter_tests)
 endif()

@@ -55,6 +55,7 @@
 #include "Realm/RealmList.h"
 #include "AuthSocket.h"
 #include "AccountNameFold.h"
+#include "AuthCounters.h"
 #include "AuthCodes.h"
 #include "AuthProtocolGuard.h"
 #include "AuthResultPolicy.h"
@@ -72,6 +73,7 @@ extern DatabaseType LoginDatabase;
 
 std::atomic<uint32> AuthSocket::s_connections{0};
 std::atomic<uint32> AuthSocket::s_authed{0};
+std::atomic<uint32> AuthSocket::s_peakConnections{0};
 
 enum AccountFlags
 {
@@ -191,7 +193,10 @@ AuthSocket::AuthSocket(
 {
     N.SetHexStr("894B645E89E1535BBDAD5B8B290650530801B18EBFBF5E8FAB3C82872A3E9BB7");
     g.SetDword(7);
-    s_connections.fetch_add(1, std::memory_order_relaxed);
+    // fetch_add returns the value from before the increment, so the number of
+    // open connections including this one is that plus one.
+    uint32 const open = s_connections.fetch_add(1, std::memory_order_relaxed) + 1;
+    MaNGOS::Realmd::RaiseHighWaterMark(s_peakConnections, open);
 }
 
 AuthSocket::~AuthSocket()

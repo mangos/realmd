@@ -172,8 +172,13 @@ class AuthSocket: public net::ISession
         /// Number of currently open auth TCP socket connections (observability).
         static uint32 GetConnectionCount() { return s_connections.load(std::memory_order_relaxed); }
 
+
         /// Number of clients currently authenticated and waiting for realm list (observability).
         static uint32 GetAuthWaitingCount() { return s_authed.load(std::memory_order_relaxed); }
+
+        /// Highest number of simultaneously open auth connections seen since
+        /// start (observability).
+        static uint32 GetPeakConnectionCount() { return s_peakConnections.load(std::memory_order_relaxed); }
 
     private:
         enum eStatus
@@ -244,6 +249,9 @@ class AuthSocket: public net::ISession
 
         /// Live count of sockets currently in STATUS_AUTHED. Observability only.
         static std::atomic<uint32> s_authed;
+
+        /// High-water mark of s_connections. Observability only, never reset.
+        static std::atomic<uint32> s_peakConnections;
 };
 #endif
 /// @}
