@@ -360,11 +360,128 @@ void TestChurnTotalsWrapCorrectly()
     window.Sample(MakeTotals(0x00000005u, 0, 0), 3010);
     CHECK(window.Rates().accepts == 21);
 }
+
+void TestUnchangedTickEmitsNothing()
+{
+    RealmChangeTracker tracker;
+    std::vector<RealmChangeEvent> events;
+
+    RealmSnapshot const first = MakeRealms({{"One", false}, {"Two", true}});
+    tracker.Observe(first, events);
+
+    // A freshly rebuilt but identical snapshot: the tick must stay silent.
+    for (int tick = 0; tick < 5; ++tick)
+    {
+        RealmSnapshot const rebuilt =
+            MakeRealms({{"One", false}, {"Two", true}});
+        CHECK(!tracker.Observe(rebuilt, events));
+        CHECK(events.empty());
+    }
+}
+
+void TestFlappingRealmEmitsExactlyTwoEvents()
+{
+    RealmChangeTracker tracker;
+    std::vector<RealmChangeEvent> events;
+    std::vector<RealmChangeEvent> collected;
+
+    tracker.Observe(MakeRealms({{"Three", false}}), events);
+
+    // Offline, then online again: two transitions, not four.
+    RealmSnapshot const offline = MakeRealms({{"Three", true}});
+    RealmSnapshot const online = MakeRealms({{"Three", false}});
+
+    tracker.Observe(offline, events);
+    collected.insert(collected.end(), events.begin(), events.end());
+
+    // Holding the same state must add nothing.
+    tracker.Observe(offline, events);
+    collected.insert(collected.end(), events.begin(), events.end());
+
+    tracker.Observe(online, events);
+    collected.insert(collected.end(), events.begin(), events.end());
+
+    tracker.Observe(online, events);
+    collected.insert(collected.end(), events.begin(), events.end());
+
+    CHECK(collected.size() == 2);
+    if (collected.size() == 2)
+    {
+        CHECK(collected[0].kind == RealmChangeEvent::REALM_CHANGE_WENT_OFFLINE);
+        CHECK(collected[0].realm == "Three");
+        CHECK(FormatRealmChangeEvent(collected[0]) ==
+            "Realm 'Three' went offline");
+        CHECK(collected[1].kind == RealmChangeEvent::REALM_CHANGE_BACK_ONLINE);
+        CHECK(FormatRealmChangeEvent(collected[1]) ==
+            "Realm 'Three' back online");
+    }
+}
+
+void TestAddedAndRemovedRealms()
+{
+    RealmChangeTracker tracker;
+    std::vector<RealmChangeEvent> events;
+
+    tracker.Observe(MakeRealms({{"One", false}, {"Two", false}}), events);
+
+    // "Two" leaves the realmlist, "Five" joins it already offline.
+    CHECK(tracker.Observe(
+        MakeRealms({{"Five", true}, {"One", false}}), events));
+    CHECK(events.size() == 2);
+    if (events.size() == 2)
+    {
+        // Reported in realm-name order.
+        CHECK(events[0].kind == RealmChangeEvent::REALM_CHANGE_ADDED);
+        CHECK(FormatRealmChangeEvent(events[0]) ==
+            "New realm 'Five' detected in realmlist");
+        CHECK(events[1].kind == RealmChangeEvent::REALM_CHANGE_REMOVED);
+        CHECK(FormatRealmChangeEvent(events[1]) ==
+            "Realm 'Two' removed from realmlist");
+    }
+
+    // An added realm that arrived offline must not then report going offline.
+    CHECK(!tracker.Observe(
+        MakeRealms({{"Five", true}, {"One", false}}), events));
+    CHECK(events.empty());
+
+    // A realm removed while offline reports removal only.
+    CHECK(tracker.Observe(MakeRealms({{"One", false}}), events));
+    CHECK(events.size() == 1);
+    if (events.size() == 1)
+    {
+        CHECK(events[0].kind == RealmChangeEvent::REALM_CHANGE_REMOVED);
+        CHECK(events[0].realm == "Five");
+    }
+}
+
+void TestEmptyRealmlistTransitions()
+{
+    RealmChangeTracker tracker;
+    std::vector<RealmChangeEvent> events;
+
+    tracker.Observe(MakeRealms({}), events);
+    CHECK(tracker.Primed());
+
+    CHECK(tracker.Observe(MakeRealms({{"One", false}}), events));
+    CHECK(events.size() == 1);
+    CHECK(events[0].kind == RealmChangeEvent::REALM_CHANGE_ADDED);
+
+    CHECK(tracker.Observe(MakeRealms({}), events));
+    CHECK(events.size() == 1);
+    CHECK(events[0].kind == RealmChangeEvent::REALM_CHANGE_REMOVED);
+
+    CHECK(!tracker.Observe(MakeRealms({}), events));
+    CHECK(events.empty());
+}
 }
 
 int main()
 {
     TestFirstObserveOnlyPrimes();
+    TestUnchangedTickEmitsNothing();
+    TestFlappingRealmEmitsExactlyTwoEvents();
+    TestAddedAndRemovedRealms();
+    TestEmptyRealmlistTransitions();
     TestChurnCountersAreMonotonic();
     TestChurnWindowRates();
     TestChurnWindowSurvivesClockGoingBackwards();
