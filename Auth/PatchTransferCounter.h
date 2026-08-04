@@ -129,6 +129,39 @@ namespace MaNGOS::Realmd
      * Safe to call when nothing is registered, and safe to call twice.
      */
     void CancelPatchTransfers();
+
+    /**
+     * @brief Wait, with a hard bound, for every live patch transfer to finish.
+     *
+     * The streaming closures are detached, so AuthServer::Stop() does not join
+     * them, yet they are console log producers: reaching static destruction
+     * while one is running lets ~Log() close the log files underneath it, and
+     * deletes the console writer thread's own view of the world. Shutdown must
+     * equally never hang on a stalled client, hence the bound.
+     *
+     * Call AuthServer::Stop() FIRST. That is what makes this a short wait: the
+     * transport's stop() disarms every send channel, and disarm()'s out.close()
+     * is what releases a transfer parked in flow->awaitWritable()
+     * (net/reactor/ReactorServer.cpp:273-278, net/iocp/IocpServer.cpp:80-84,
+     * net/uring/UringServer.cpp:251-256). CancelPatchTransfers() may then be
+     * called as cleanup, but it records close intent only and does not force a
+     * close (net/iocp/IocpServer.cpp:52), so it is not what shortens this wait.
+     *
+     * The idle case is tested before any waiting, so a zero or negative timeout
+     * still reports an already-quiet daemon truthfully. The wait itself is a
+     * single deadline, re-tested on spurious wakeups and never extended, and it
+     * wakes on the last guard's release rather than by polling.
+     *
+     * @param timeout Longest time to wait. Must comfortably exceed the one
+     *        second the streaming closure sleeps before its first loop
+     *        iteration (Auth/PatchHandler.cpp:75), or a just-accepted transfer
+     *        cannot even have looked at flow control yet, let alone noticed
+     *        that its channel was disarmed.
+     * @return true when nothing is live; false when the timeout expired with at
+     *         least one transfer still running. The caller must treat false as
+     *         "producers may still be alive" and act accordingly.
+     */
+    bool DrainPatchTransfers(std::chrono::milliseconds timeout);
 }
 
 #endif

@@ -161,4 +161,25 @@ void CancelPatchTransfers()
     }
 }
 
+bool DrainPatchTransfers(std::chrono::milliseconds timeout)
+{
+    std::unique_lock<std::mutex> lock(State().mutex);
+
+    // Tested before any waiting: the ordinary shutdown has no transfer in
+    // flight and must return instantly, and a caller passing no timeout at all
+    // still deserves a truthful answer rather than a reflexive failure.
+    if (State().closers.empty())
+    {
+        return true;
+    }
+    if (timeout <= std::chrono::milliseconds::zero())
+    {
+        return false;
+    }
+
+    // One deadline, re-tested on spurious wakeups and never extended by them.
+    return State().idle.wait_for(lock, timeout,
+        [] { return State().closers.empty(); });
+}
+
 }
