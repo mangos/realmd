@@ -63,6 +63,7 @@
 #include "SystemConfig.h"
 #include "ScheduledExit.h"
 #include "Events/RealmChangeTracker.h"
+#include "Events/DbHealthTracker.h"
 #include "Util.h"
 
 #include <openssl/opensslv.h>
@@ -139,6 +140,7 @@ namespace
 
     MaNGOS::Realmd::RealmChangeTracker s_realmChanges;
     RealmSnapshotStore::SnapshotPtr s_lastRealmSnapshot;
+    MaNGOS::Realmd::DbHealthTracker s_dbHealth;
 
     void LoadScheduledExitConfig()
     {
@@ -285,6 +287,20 @@ namespace
         {
             sLog.outString("%s",
                 MaNGOS::Realmd::FormatRealmChangeEvent(event).c_str());
+        }
+    }
+
+    /// Log login-database health only when its derived state changes.
+    ///
+    /// Like ReportRealmChanges, this helper logs and does nothing else. It
+    /// must never touch ConsoleUI: PublishStatus is realmd's only publisher.
+    void ReportDbHealth()
+    {
+        std::string event;
+        if (s_dbHealth.Observe(
+                MaNGOS::Realmd::GetLoginDbHealth(), time(NULL), event))
+        {
+            sLog.outString("%s", event.c_str());
         }
     }
 }
@@ -698,6 +714,10 @@ extern int main(int argc, char** argv)
 
     // maximum counter for next ping
     uint32 numLoops = (sConfig.GetIntDefault("MaxPingTime", 30) * (MINUTE * 1000000 / 100000));
+    // The probe runs on the MaxPingTime cadence, so allow two missed rounds
+    // before calling the reading stale.
+    s_dbHealth.SetStaleAfter(
+        time_t(sConfig.GetIntDefault("MaxPingTime", 30)) * MINUTE * 2);
     uint32 loopCounter = 0;
     uint32 logFlushCounter = 0;
     uint32 statusUpdateCounter = 0;
@@ -739,6 +759,7 @@ extern int main(int argc, char** argv)
         // the run being replayed into the operator's shell after exit.
         console.DrainInput();
         ReportRealmChanges();
+        ReportDbHealth();
 
         // Once a second: ten iterations of the 100 ms housekeeping loop. The
         // console writer repaints on its own roughly every 5 ms, so nothing

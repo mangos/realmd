@@ -22,6 +22,8 @@
  * and lore are copyrighted by Blizzard Entertainment, Inc.
  */
 #include "Events/RealmChangeTracker.h"
+#include "Events/EventFormat.h"
+#include "Events/DbHealthTracker.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -36,6 +38,10 @@
 using MaNGOS::Realmd::FormatRealmChangeEvent;
 using MaNGOS::Realmd::RealmChangeEvent;
 using MaNGOS::Realmd::RealmChangeTracker;
+using MaNGOS::Realmd::FormatShortDuration;
+using MaNGOS::Realmd::DbHealthTracker;
+using MaNGOS::Realmd::DbProbeState;
+using MaNGOS::Realmd::LoginDbHealth;
 
 namespace
 {
@@ -76,11 +82,119 @@ void TestFirstObserveOnlyPrimes()
     CHECK(events.empty());
     CHECK(tracker.Primed());
 }
+
+void TestShortDurationFormatting()
+{
+    CHECK(FormatShortDuration(-5) == "0s");
+    CHECK(FormatShortDuration(0) == "0s");
+    CHECK(FormatShortDuration(45) == "45s");
+    CHECK(FormatShortDuration(63) == "1m03s");
+    CHECK(FormatShortDuration(3600) == "1h00m");
+    CHECK(FormatShortDuration(7500) == "2h05m");
+    CHECK(FormatShortDuration(273120) == "3d03h");
+}
+
+LoginDbHealth MakeHealth(DbProbeState state, uint32 latencyMs,
+                         time_t lastSuccess)
+{
+    LoginDbHealth health;
+    health.state = state;
+    health.latencyMs = latencyMs;
+    health.lastSuccess = lastSuccess;
+    return health;
+}
+
+void TestDbHealthReportsOnlyTransitions()
+{
+    DbHealthTracker tracker(120);
+    std::string event;
+
+    // No probe has completed yet: nothing to say.
+    CHECK(!tracker.Observe(
+        MakeHealth(DbProbeState::Unknown, 0, 0), 1000, event));
+    CHECK(tracker.State() == MaNGOS::Realmd::DB_HEALTH_UNKNOWN);
+    CHECK(event.empty());
+
+    // First success is a transition out of "unknown".
+    CHECK(tracker.Observe(MakeHealth(DbProbeState::Ok, 4, 1000), 1000, event));
+    CHECK(event == "Login database probe ok (4 ms)");
+    CHECK(tracker.State() == MaNGOS::Realmd::DB_HEALTH_OK);
+
+    // A second identical reading says nothing.
+    CHECK(!tracker.Observe(MakeHealth(DbProbeState::Ok, 4, 1000), 1001, event));
+    CHECK(event.empty());
+
+    // Failure once, and only once. now 1010 - lastSuccess 1001 = 9s.
+    CHECK(tracker.Observe(
+        MakeHealth(DbProbeState::Down, 0, 1001), 1010, event));
+    CHECK(event ==
+        "Login database down (probe failed; last success 9s ago)");
+    CHECK(tracker.State() == MaNGOS::Realmd::DB_HEALTH_DOWN);
+    CHECK(!tracker.Observe(
+        MakeHealth(DbProbeState::Down, 0, 1001), 1020, event));
+    CHECK(event.empty());
+
+    // Recovery reports the outage length and the fresh probe latency.
+    // Down since 1010, now 1070: held for 60s = "1m00s".
+    CHECK(tracker.Observe(MakeHealth(DbProbeState::Ok, 7, 1070), 1070, event));
+    CHECK(event == "Login database recovered (probe 7 ms; down for 1m00s)");
+    CHECK(tracker.State() == MaNGOS::Realmd::DB_HEALTH_OK);
+
+    // The probe stops running: 1200 - 1070 = 130 > 120, so the reading is
+    // stale even though its state is still Ok. 130s = "2m10s".
+    CHECK(tracker.Observe(MakeHealth(DbProbeState::Ok, 7, 1070), 1200, event));
+    CHECK(event == "Login database probe stale (last success 2m10s ago)");
+    CHECK(tracker.State() == MaNGOS::Realmd::DB_HEALTH_STALE);
+    CHECK(!tracker.Observe(MakeHealth(DbProbeState::Ok, 7, 1070), 1201, event));
+
+    // Stale since 1200, now 1300: 100s = "1m40s".
+    CHECK(tracker.Observe(MakeHealth(DbProbeState::Ok, 5, 1300), 1300, event));
+    CHECK(event ==
+        "Login database probe fresh again (probe 5 ms; stale for 1m40s)");
+    CHECK(tracker.State() == MaNGOS::Realmd::DB_HEALTH_OK);
+}
+
+void TestDbHealthDownBeforeAnySuccess()
+{
+    DbHealthTracker tracker(120);
+    std::string event;
+    CHECK(tracker.Observe(MakeHealth(DbProbeState::Down, 0, 0), 500, event));
+    CHECK(event ==
+        "Login database down (probe failed; no successful probe yet)");
+    CHECK(tracker.State() == MaNGOS::Realmd::DB_HEALTH_DOWN);
+}
+
+// A backwards wall-clock step must not be mistaken for "never succeeded".
+// lastSuccess is nonzero, so a probe HAS succeeded; only the elapsed time is
+// unrepresentable, and it clamps to zero.
+void TestDbHealthBackwardClockKeepsLastSuccess()
+{
+    DbHealthTracker tracker(120);
+    std::string event;
+
+    CHECK(tracker.Observe(MakeHealth(DbProbeState::Ok, 4, 5000), 5000, event));
+    CHECK(tracker.State() == MaNGOS::Realmd::DB_HEALTH_OK);
+
+    // The clock steps back behind lastSuccess before the next probe fails.
+    CHECK(tracker.Observe(
+        MakeHealth(DbProbeState::Down, 0, 5000), 4000, event));
+    CHECK(event ==
+        "Login database down (probe failed; last success 0s ago)");
+    CHECK(tracker.State() == MaNGOS::Realmd::DB_HEALTH_DOWN);
+
+    // Recovery after a backwards step reports a clamped, not negative, outage.
+    CHECK(tracker.Observe(MakeHealth(DbProbeState::Ok, 6, 3900), 3900, event));
+    CHECK(event == "Login database recovered (probe 6 ms; down for 0s)");
+}
 }
 
 int main()
 {
     TestFirstObserveOnlyPrimes();
+    TestShortDurationFormatting();
+    TestDbHealthReportsOnlyTransitions();
+    TestDbHealthDownBeforeAnySuccess();
+    TestDbHealthBackwardClockKeepsLastSuccess();
 
     if (failures != 0)
     {
