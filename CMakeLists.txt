@@ -259,4 +259,25 @@ if(WITH_TESTS OR BUILD_TESTING)
             -DREALMD_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CheckConsoleLifecycle.cmake
     )
+
+
+    # Links `shared` because Console/RealmdStatus.h includes Platform/Define.h
+    # and Realm/RealmSnapshot.h, and Console/RealmdConsole.cpp includes
+    # Console/ConsoleUI.h -- all of which src/shared exports PUBLIC from its own
+    # source directory (src/shared/CMakeLists.txt:261-266). Linking `shared` is
+    # the only sanctioned route: the parent core's hardcoded realmd test list at
+    # src/CMakeLists.txt:65-73 cannot be extended from inside this submodule.
+    add_executable(realmd_console_tests
+        Tests/RealmdConsoleTests.cpp
+    )
+    target_compile_features(realmd_console_tests PUBLIC cxx_std_17)
+    set_target_properties(realmd_console_tests PROPERTIES CXX_EXTENSIONS OFF)
+    target_include_directories(realmd_console_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(realmd_console_tests PRIVATE
+        shared
+        Threads::Threads
+    )
+    add_test(NAME realmd_console_tests COMMAND realmd_console_tests)
 endif()
