@@ -42,7 +42,12 @@ int failures = 0;
         }                                                                       \
     } while (false)
 
+using MaNGOS::Realmd::GetLogonCounts;
+using MaNGOS::Realmd::LogonAttemptRecorder;
+using MaNGOS::Realmd::LogonCounts;
+using MaNGOS::Realmd::LogonOutcome;
 using MaNGOS::Realmd::RaiseHighWaterMark;
+using MaNGOS::Realmd::ResetLogonCounts;
 
 void TestHighWaterMarkOnlyRises()
 {
@@ -64,11 +69,90 @@ void TestHighWaterMarkOnlyRises()
     RaiseHighWaterMark(peak, 7);
     CHECK(peak.load() == 7);
 }
+
+
+void TestEachOutcomeIncrementsOneCategory()
+{
+    ResetLogonCounts();
+
+    LogonAttemptRecorder().Record(LogonOutcome::Ok);
+    LogonAttemptRecorder().Record(LogonOutcome::Rejected);
+    LogonAttemptRecorder().Record(LogonOutcome::BadProof);
+    LogonAttemptRecorder().Record(LogonOutcome::BuildPatch);
+
+    LogonCounts const counts = GetLogonCounts();
+    CHECK(counts.ok == 1);
+    CHECK(counts.rejected == 1);
+    CHECK(counts.badProof == 1);
+    CHECK(counts.buildPatch == 1);
+    CHECK(counts.Total() == 4);
+    CHECK(counts.Failures() == 3);
+}
+
+void TestConnectionContributesAtMostOneIncrement()
+{
+    ResetLogonCounts();
+
+    LogonAttemptRecorder connection;
+    CHECK(!connection.Recorded());
+
+    connection.Record(LogonOutcome::Rejected);
+    CHECK(connection.Recorded());
+
+    // Whatever a later handler decides on the same connection is dropped: one
+    // connection is one attempt, in whatever order the handlers run.
+    connection.Record(LogonOutcome::BuildPatch);
+    connection.Record(LogonOutcome::Ok);
+
+    LogonCounts const counts = GetLogonCounts();
+    CHECK(counts.Total() == 1);
+    CHECK(counts.rejected == 1);
+    CHECK(counts.buildPatch == 0);
+    CHECK(counts.ok == 0);
+}
+
+void TestRecordersAreIndependentOfEachOther()
+{
+    ResetLogonCounts();
+
+    LogonAttemptRecorder first;
+    LogonAttemptRecorder second;
+
+    first.Record(LogonOutcome::Ok);
+    first.Record(LogonOutcome::Ok);
+    second.Record(LogonOutcome::BadProof);
+    second.Record(LogonOutcome::BadProof);
+
+    LogonCounts const counts = GetLogonCounts();
+    CHECK(counts.ok == 1);
+    CHECK(counts.badProof == 1);
+    CHECK(counts.Total() == 2);
+}
+
+void TestTotalsAggregateTheFourCategories()
+{
+    LogonCounts counts;
+    counts.ok = 1247;
+    counts.rejected = 20;
+    counts.badProof = 15;
+    counts.buildPatch = 2;
+
+    CHECK(counts.Failures() == 37);
+    CHECK(counts.Total() == 1284);
+
+    LogonCounts const empty;
+    CHECK(empty.Failures() == 0);
+    CHECK(empty.Total() == 0);
+}
 }
 
 int main()
 {
     TestHighWaterMarkOnlyRises();
+    TestEachOutcomeIncrementsOneCategory();
+    TestConnectionContributesAtMostOneIncrement();
+    TestRecordersAreIndependentOfEachOther();
+    TestTotalsAggregateTheFourCategories();
 
     if (failures != 0)
     {

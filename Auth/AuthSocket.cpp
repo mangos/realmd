@@ -744,6 +744,17 @@ bool AuthSocket::_HandleLogonChallenge()
     }
     send((char const*)pkt.contents(), pkt.size());
     return true;
+    // Line 537 closed the session up front and only the success path at the end
+    // of the account branch reopens it as STATUS_LOGON_PROOF. Anything still
+    // closed here is a rejected challenge: banned IP, IP-locked account, banned
+    // or suspended account, or no such account. Deriving it from _status rather
+    // than from an error code means a rejection reason added later is counted
+    // without touching this site.
+    if (_status != STATUS_LOGON_PROOF)
+    {
+        m_logonOutcome.Record(MaNGOS::Realmd::LogonOutcome::Rejected);
+    }
+
 }
 
 /// Logon Proof command handler
@@ -887,6 +898,7 @@ bool AuthSocket::_HandleLogonProof()
         _status = STATUS_AUTHED;
         deactivate_auth_deadline();
         s_authed.fetch_add(1, std::memory_order_relaxed);
+        m_logonOutcome.Record(MaNGOS::Realmd::LogonOutcome::Ok);
     }
     else
     {
@@ -902,6 +914,7 @@ bool AuthSocket::_HandleLogonProof()
             send(data, sizeof(data));
         }
         BASIC_LOG("[AuthChallenge] account %s tried to login with wrong password!", _displaylogin.c_str());
+        m_logonOutcome.Record(MaNGOS::Realmd::LogonOutcome::BadProof);
 
         uint32 MaxWrongPassCount = sConfig.GetIntDefault("WrongPass.MaxCount", 0);
         if (MaxWrongPassCount > 0)
@@ -1009,6 +1022,7 @@ bool AuthSocket::_HandleReconnectChallenge()
     if (!result)
     {
         sLog.outError("[ERROR] user %s tried to login and we can not find his session key in the database.", _displaylogin.c_str());
+        m_logonOutcome.Record(MaNGOS::Realmd::LogonOutcome::Rejected);
         close_connection();
         return false;
     }
@@ -1075,12 +1089,14 @@ bool AuthSocket::_HandleReconnectProof()
         _status = STATUS_AUTHED;
         deactivate_auth_deadline();
         s_authed.fetch_add(1, std::memory_order_relaxed);
+        m_logonOutcome.Record(MaNGOS::Realmd::LogonOutcome::Ok);
 
         return true;
     }
     else
     {
         sLog.outError("[ERROR] user %s tried to login, but session invalid.", _displaylogin.c_str());
+        m_logonOutcome.Record(MaNGOS::Realmd::LogonOutcome::BadProof);
         close_connection();
         return false;
     }
@@ -1435,6 +1451,12 @@ bool AuthSocket::OfferPatch()
 
 void AuthSocket::SendInvalidVersion()
 {
+    // Counted here rather than at the call sites, because SendInvalidVersion is
+    // the response to BOTH an unsupported build (line 839) and a required patch
+    // archive that will not open (line 1390). One site, one increment, both
+    // causes. A correct password followed by a missing archive therefore counts
+    // once, as build/patch, and not as ok.
+    m_logonOutcome.Record(MaNGOS::Realmd::LogonOutcome::BuildPatch);
     ByteBuffer packet;
     packet << static_cast<uint8>(CMD_AUTH_LOGON_CHALLENGE);
     packet << static_cast<uint8>(0x00);

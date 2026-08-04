@@ -35,6 +35,7 @@
 #include <memory>
 #include "Auth/BigNumber.h"
 #include "Auth/Sha1.h"
+#include "AuthCounters.h"
 #include "AuthProtocolGuard.h"
 #include "PatchPolicy.h"
 #include "ByteBuffer.h"
@@ -243,6 +244,11 @@ class AuthSocket: public net::ISession
         std::unique_ptr<PatchArtifact> m_patchArtifact;
         uint16 _build; /**< TODO */
         AccountTypes _accountSecurityLevel; /**< TODO */
+
+        /// Terminal outcome of this connection's authentication attempt.
+        /// Latched, so a connection contributes at most one increment to the
+        /// process-wide counters however the handlers are ordered.
+        MaNGOS::Realmd::LogonAttemptRecorder m_logonOutcome;
 
         /// Live count of constructed AuthSocket objects (open connections). Observability only.
         static std::atomic<uint32> s_connections;

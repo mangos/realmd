@@ -26,6 +26,23 @@
 
 #include "AuthCounters.h"
 
+
+namespace
+{
+// Namespace scope and constant-initialised, so the counters outlive every
+// socket and every network worker: an increment arriving late in shutdown can
+// never touch storage that has already been destroyed. Being trivially
+// destructible is also what makes them safe on the lifecycle invariant's
+// std::_Exit path, which skips static destruction entirely. That is why they
+// are plain atomics rather than the deliberately leaked heap state phase 1's
+// PatchTransferState uses -- that one owns a mutex and a condition_variable,
+// and those do have destructors.
+std::atomic<uint32> s_logonOk{0};
+std::atomic<uint32> s_logonRejected{0};
+std::atomic<uint32> s_logonBadProof{0};
+std::atomic<uint32> s_logonBuildPatch{0};
+}
+
 namespace MaNGOS::Realmd
 {
 void RaiseHighWaterMark(std::atomic<uint32>& peak, uint32 current)
@@ -37,5 +54,53 @@ void RaiseHighWaterMark(std::atomic<uint32>& peak, uint32 current)
                std::memory_order_relaxed, std::memory_order_relaxed))
     {
     }
+}
+
+void CountLogonOutcome(LogonOutcome outcome)
+{
+    switch (outcome)
+    {
+        case LogonOutcome::Ok:
+            s_logonOk.fetch_add(1, std::memory_order_relaxed);
+            break;
+        case LogonOutcome::Rejected:
+            s_logonRejected.fetch_add(1, std::memory_order_relaxed);
+            break;
+        case LogonOutcome::BadProof:
+            s_logonBadProof.fetch_add(1, std::memory_order_relaxed);
+            break;
+        case LogonOutcome::BuildPatch:
+            s_logonBuildPatch.fetch_add(1, std::memory_order_relaxed);
+            break;
+    }
+}
+
+LogonCounts GetLogonCounts()
+{
+    LogonCounts counts;
+    counts.ok = s_logonOk.load(std::memory_order_relaxed);
+    counts.rejected = s_logonRejected.load(std::memory_order_relaxed);
+    counts.badProof = s_logonBadProof.load(std::memory_order_relaxed);
+    counts.buildPatch = s_logonBuildPatch.load(std::memory_order_relaxed);
+    return counts;
+}
+
+void ResetLogonCounts()
+{
+    s_logonOk.store(0, std::memory_order_relaxed);
+    s_logonRejected.store(0, std::memory_order_relaxed);
+    s_logonBadProof.store(0, std::memory_order_relaxed);
+    s_logonBuildPatch.store(0, std::memory_order_relaxed);
+}
+
+void LogonAttemptRecorder::Record(LogonOutcome outcome)
+{
+    if (m_recorded)
+    {
+        return;
+    }
+
+    m_recorded = true;
+    CountLogonOutcome(outcome);
 }
 }
