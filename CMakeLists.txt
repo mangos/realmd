@@ -299,4 +299,19 @@ if(WITH_TESTS OR BUILD_TESTING)
         Threads::Threads
     )
     add_test(NAME realmd_auth_counter_tests COMMAND realmd_auth_counter_tests)
+
+
+    add_executable(realmd_login_db_health_tests
+        Tests/LoginDbHealthTests.cpp
+        Console/LoginDbHealth.cpp
+    )
+    target_compile_features(realmd_login_db_health_tests PUBLIC cxx_std_17)
+    set_target_properties(realmd_login_db_health_tests PROPERTIES CXX_EXTENSIONS OFF)
+    target_include_directories(realmd_login_db_health_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(realmd_login_db_health_tests PRIVATE
+        shared
+    )
+    add_test(NAME realmd_login_db_health_tests COMMAND realmd_login_db_health_tests)
 endif()

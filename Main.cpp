@@ -57,6 +57,7 @@
 #include "Auth/AuthServer.h"
 #include "Auth/PatchTransferCounter.h"
 #include "Console/ConsoleLifecycle.h"
+#include "Console/LoginDbHealth.h"
 #include "Console/RealmdConsole.h"
 #include "Console/StatusSource.h"
 #include "SystemConfig.h"
@@ -210,6 +211,44 @@ namespace
         sLog.outString("ScheduledExit: firing scheduled %s",
             MaNGOS::ScheduledExitModeToString(s_scheduledExit.mode));
         stopEvent = true;
+    }
+
+    /**
+     * @brief Probe the login database, recording whether it answered and how
+     *        long the call took.
+     *
+     * DatabaseType::Ping() (shared/Database/Database.cpp:295) returns void and
+     * throws its own result away, so it cannot tell the operator whether the
+     * login database is answering or how slowly. This runs realmd's own probe
+     * on the same MaxPingTime cadence and records what it saw.
+     *
+     * The measured span starts before Query(), which takes a pooled-connection
+     * lock first, so it includes any wait for a free connection and is not a
+     * pure round trip. It is on the same cadence as the Ping() above it, so it
+     * adds no new blocking behaviour to this loop.
+     *
+     * Failure is a null result, not an exception, and this function has no
+     * early return: it introduces no path that could leave main with the
+     * console log writer still running.
+     */
+    void ProbeLoginDatabase()
+    {
+        std::chrono::steady_clock::time_point const started =
+            std::chrono::steady_clock::now();
+
+        QueryResult* result = LoginDatabase.Query("SELECT 1");
+        bool const ok = (result != nullptr);
+
+        // Query() returns an OWNING raw pointer (Database.h:279). Without this
+        // delete the probe leaks one result set every MaxPingTime minutes for
+        // the lifetime of the process.
+        delete result;
+
+        uint32 const latencyMs = static_cast<uint32>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - started).count());
+
+        MaNGOS::Realmd::RecordLoginDbProbe(ok, latencyMs, time(NULL));
     }
 }
 
@@ -653,6 +692,7 @@ extern int main(int argc, char** argv)
             loopCounter = 0;
             DETAIL_LOG("Ping MySQL to keep connection alive");
             LoginDatabase.Ping();
+            ProbeLoginDatabase();
         }
 
         CheckScheduledExit();
