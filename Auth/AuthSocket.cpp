@@ -79,6 +79,31 @@ enum AccountFlags
     ACCOUNT_FLAG_PROPASS    = 0x00800000,
 };
 
+namespace
+{
+    /**
+     * Every SRP6 quantity has a width the protocol fixes, and the client reads and
+     * hashes it at that width whatever the number happens to be worth.
+     *
+     * Asking a BigNumber how long it is answers with the minimal encoding instead --
+     * one byte shorter whenever the most significant byte is zero, which for these
+     * uniformly distributed values is one login in 256. The proof is then computed over
+     * a different byte string than the client used, the password looks wrong, and the
+     * next attempt works. It reads exactly like a flaky connection.
+     *
+     * So no width here is ever derived from a value. These are the protocol's.
+     */
+    const int SRP_EPHEMERAL_WIDTH = 32;                 // N, A, B
+    const int SRP_SESSION_KEY_WIDTH = 40;               // K
+    const int SRP_GENERATOR_WIDTH = 1;                  // g
+    const int SRP_RECONNECT_WIDTH = 16;
+
+    void UpdateFixed(Sha1Hash& sha, BigNumber& value, int width)
+    {
+        sha.UpdateData(value.AsByteArray(width), width);
+    }
+}
+
 // GCC have alternative #pragma pack(N) syntax and old gcc version not support pack(push,N), also any gcc version not support it at some paltform
 #if defined( __GNUC__ )
 #pragma pack(1)
@@ -440,18 +465,23 @@ void AuthSocket::_SetVSFields(const std::string& rI)
     BigNumber I;
     I.SetHexStr(rI.c_str());
 
-    // In case of leading zeros in the rI hash, restore them
+    // In case of leading zeros in the rI hash, restore them: asking for the full digest
+    // width pads at the front, where a copy of the minimal encoding used to rely on the
+    // zeroed tail of this buffer landing in the right place after the reverse below.
     uint8 mDigest[SHA_DIGEST_LENGTH];
     memset(mDigest, 0, SHA_DIGEST_LENGTH);
     if (I.GetNumBytes() <= SHA_DIGEST_LENGTH)
     {
-        memcpy(mDigest, I.AsByteArray(), I.GetNumBytes());
+        memcpy(mDigest, I.AsByteArray(SHA_DIGEST_LENGTH), SHA_DIGEST_LENGTH);
     }
 
     std::reverse(mDigest, mDigest + SHA_DIGEST_LENGTH);
 
+    // x = H(s | H(USER:PASS)) over the whole salt. A short one here is not a failed
+    // login but a verifier stored against a byte string the client will never produce,
+    // so that account is broken for good rather than until the next attempt.
     Sha1Hash sha;
-    sha.UpdateData(s.AsByteArray(), s.GetNumBytes());
+    sha.UpdateData(s.AsByteArray(s_BYTE_SIZE), s_BYTE_SIZE);
     sha.UpdateData(mDigest, SHA_DIGEST_LENGTH);
     sha.Finalize();
     BigNumber x;
@@ -680,13 +710,16 @@ bool AuthSocket::_HandleLogonChallenge()
                     pkt << uint8(WOW_SUCCESS);
 
                     // B may be calculated < 32B so we force minimal length to 32B
-                    pkt.append(B.AsByteArray(32), 32);      // 32 bytes
-                    pkt << uint8(1);
-                    pkt.append(g.AsByteArray(), 1);
-                    pkt << uint8(32);
-                    pkt.append(N.AsByteArray(32), 32);
-                    pkt.append(s.AsByteArray(), s.GetNumBytes());// 32 bytes
-                    pkt.append(unk3.AsByteArray(16), 16);
+                    pkt.append(B.AsByteArray(SRP_EPHEMERAL_WIDTH), SRP_EPHEMERAL_WIDTH);
+                    pkt << uint8(SRP_GENERATOR_WIDTH);
+                    pkt.append(g.AsByteArray(SRP_GENERATOR_WIDTH), SRP_GENERATOR_WIDTH);
+                    pkt << uint8(SRP_EPHEMERAL_WIDTH);
+                    pkt.append(N.AsByteArray(SRP_EPHEMERAL_WIDTH), SRP_EPHEMERAL_WIDTH);
+                    // The salt is s_BYTE_SIZE wide because the packet says so a few
+                    // lines up and the client reads exactly that many. Appending
+                    // GetNumBytes() sent 31 once in 256 and shifted everything after it.
+                    pkt.append(s.AsByteArray(s_BYTE_SIZE), s_BYTE_SIZE);
+                    pkt.append(unk3.AsByteArray(SRP_RECONNECT_WIDTH), SRP_RECONNECT_WIDTH);
                     uint8 securityFlags = 0;
                     pkt << uint8(securityFlags);            // security flags (0x0...0x04)
 
@@ -760,7 +793,8 @@ bool AuthSocket::_HandleLogonProof()
     }
 
     Sha1Hash sha;
-    sha.UpdateBigNumbers(&A, &B, NULL);
+    UpdateFixed(sha, A, SRP_EPHEMERAL_WIDTH);
+    UpdateFixed(sha, B, SRP_EPHEMERAL_WIDTH);
     sha.Finalize();
     BigNumber u;
     u.SetBinary(sha.GetDigest(), 20);
@@ -769,7 +803,7 @@ bool AuthSocket::_HandleLogonProof()
     uint8 t[32];
     uint8 t1[16];
     uint8 vK[40];
-    memcpy(t, S.AsByteArray(32), 32);
+    memcpy(t, S.AsByteArray(SRP_EPHEMERAL_WIDTH), SRP_EPHEMERAL_WIDTH);
     for (int i = 0; i < 16; ++i)
     {
         t1[i] = t[i * 2];
@@ -797,11 +831,11 @@ bool AuthSocket::_HandleLogonProof()
     uint8 hash[20];
 
     sha.Initialize();
-    sha.UpdateBigNumbers(&N, NULL);
+    UpdateFixed(sha, N, SRP_EPHEMERAL_WIDTH);
     sha.Finalize();
-    memcpy(hash, sha.GetDigest(), 20);
+    memcpy(hash, sha.GetDigest(), SHA_DIGEST_LENGTH);
     sha.Initialize();
-    sha.UpdateBigNumbers(&g, NULL);
+    UpdateFixed(sha, g, SRP_GENERATOR_WIDTH);
     sha.Finalize();
     for (int i = 0; i < 20; ++i)
     {
@@ -817,15 +851,21 @@ bool AuthSocket::_HandleLogonProof()
     memcpy(t4, sha.GetDigest(), SHA_DIGEST_LENGTH);
 
     sha.Initialize();
-    sha.UpdateBigNumbers(&t3, NULL);
+    UpdateFixed(sha, t3, SHA_DIGEST_LENGTH);
     sha.UpdateData(t4, SHA_DIGEST_LENGTH);
-    sha.UpdateBigNumbers(&s, &A, &B, &K, NULL);
+    UpdateFixed(sha, s, s_BYTE_SIZE);
+    UpdateFixed(sha, A, SRP_EPHEMERAL_WIDTH);
+    UpdateFixed(sha, B, SRP_EPHEMERAL_WIDTH);
+    UpdateFixed(sha, K, SRP_SESSION_KEY_WIDTH);
     sha.Finalize();
     BigNumber M;
-    M.SetBinary(sha.GetDigest(), 20);
+    M.SetBinary(sha.GetDigest(), SHA_DIGEST_LENGTH);
 
     ///- Check if SRP6 results match (password is correct), else send an error
-    if (!memcmp(M.AsByteArray(), lp.M1, 20))
+    // The width matters twice here. A proof whose top byte is zero used to serialise as
+    // nineteen bytes, so this read one byte past the end of that buffer and compared
+    // whatever followed it -- a heap over-read that also rejected a correct password.
+    if (!memcmp(M.AsByteArray(SHA_DIGEST_LENGTH), lp.M1, SHA_DIGEST_LENGTH))
     {
         BASIC_LOG("User '%s' successfully authenticated", _login.c_str());
 
@@ -867,7 +907,9 @@ bool AuthSocket::_HandleLogonProof()
 
         ///- Finish SRP6 and send the final result to the client
         sha.Initialize();
-        sha.UpdateBigNumbers(&A, &M, &K, NULL);
+        UpdateFixed(sha, A, SRP_EPHEMERAL_WIDTH);
+        UpdateFixed(sha, M, SHA_DIGEST_LENGTH);
+        UpdateFixed(sha, K, SRP_SESSION_KEY_WIDTH);
         sha.Finalize();
 
         SendProof(sha);
@@ -1008,7 +1050,7 @@ bool AuthSocket::_HandleReconnectChallenge()
     pkt << (uint8)  CMD_AUTH_RECONNECT_CHALLENGE;
     pkt << (uint8)  0x00;
     _reconnectProof.SetRand(16 * 8);
-    pkt.append(_reconnectProof.AsByteArray(16), 16);        // 16 bytes random
+    pkt.append(_reconnectProof.AsByteArray(SRP_RECONNECT_WIDTH), SRP_RECONNECT_WIDTH);
     pkt << (uint64) 0x00 << (uint64) 0x00;                  // 16 bytes zeros
     send((char const*)pkt.contents(), pkt.size());
     return true;
@@ -1038,7 +1080,9 @@ bool AuthSocket::_HandleReconnectProof()
     Sha1Hash sha;
     sha.Initialize();
     sha.UpdateData(_login);
-    sha.UpdateBigNumbers(&t1, &_reconnectProof, &K, NULL);
+    UpdateFixed(sha, t1, SRP_RECONNECT_WIDTH);
+    UpdateFixed(sha, _reconnectProof, SRP_RECONNECT_WIDTH);
+    UpdateFixed(sha, K, SRP_SESSION_KEY_WIDTH);
     sha.Finalize();
 
     if (!memcmp(sha.GetDigest(), lp.R2, SHA_DIGEST_LENGTH))

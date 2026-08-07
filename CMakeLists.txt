@@ -138,6 +138,12 @@ if(WITH_TESTS OR BUILD_TESTING)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CheckAuthSafety.cmake
     )
 
+    add_test(NAME realmd_srp6_width_policy
+        COMMAND ${CMAKE_COMMAND}
+            -DREALMD_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CheckSrp6Widths.cmake
+    )
+
     add_executable(realmd_patch_safety_tests
         Tests/PatchSafetyTests.cpp
         Auth/PatchPolicy.cpp
