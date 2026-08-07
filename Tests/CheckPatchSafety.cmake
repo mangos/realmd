@@ -33,7 +33,8 @@ foreach(REQUIRED_TEXT
 endforeach()
 
 string(FIND "${AUTH_SOCKET}"
-  "if (!memcmp(M.AsByteArray(), lp.M1, 20))" VERIFIED_PROOF)
+  "if (!memcmp(M.AsByteArray(SHA_DIGEST_LENGTH), lp.M1, SHA_DIGEST_LENGTH))"
+  VERIFIED_PROOF)
 string(FIND "${AUTH_SOCKET}"
   "_patchPolicy.ShouldPatch" PATCH_DECISION)
 if(VERIFIED_PROOF EQUAL -1 OR
