@@ -61,8 +61,6 @@
 
 #include <openssl/opensslv.h>
 #include <openssl/crypto.h>
-#include <openssl/provider.h>
-#include "Auth/OpenSSLProvider.h"
 
 #include <chrono>
 #include <cstring>
@@ -425,14 +423,6 @@ extern int main(int argc, char** argv)
     LoadScheduledExitConfig();
 
     DETAIL_LOG("Using SSL version: %s (Library: %s)", OPENSSL_VERSION_TEXT, OpenSSL_version(OPENSSL_VERSION));
-
-    // RAII provider management - automatically handles cleanup
-    OpenSSLProviderManager providerManager;
-    if (!providerManager.IsInitialized())
-    {
-        Log::WaitBeforeContinueIfNeed();
-        return 1;
-    }
 
     /// realmd PID file creation
     std::string pidfile = sConfig.GetStringDefault("PidFile", "");
