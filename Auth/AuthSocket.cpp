@@ -585,7 +585,6 @@ bool AuthSocket::_HandleLogonChallenge()
     EndianConvert(*((uint32*)(&ch->gamename[0])));
     EndianConvert(ch->build);
     EndianConvert(*((uint32*)(&ch->platform[0])));
-    EndianConvert(*((uint32*)(&ch->os[0])));
     EndianConvert(ch->timezone_bias);
     EndianConvert(ch->ip);
 
