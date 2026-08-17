@@ -166,6 +166,7 @@ if(WITH_TESTS OR BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
     target_link_libraries(realmd_patch_safety_tests PRIVATE
+        shared
         mangos_openssl
         mangos_openssl_strict
     )
