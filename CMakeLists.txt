@@ -92,6 +92,17 @@ endif()
 # parents, so realmd tests remain opt-in while working with every supported
 # parent convention.
 if(WITH_TESTS OR BUILD_TESTING)
+    add_executable(realmd_client_locale_tests
+        Tests/ClientLocaleTests.cpp
+        Auth/ClientLocale.cpp
+    )
+    target_compile_features(realmd_client_locale_tests PUBLIC cxx_std_17)
+    set_target_properties(realmd_client_locale_tests PROPERTIES CXX_EXTENSIONS OFF)
+    target_include_directories(realmd_client_locale_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    add_test(NAME realmd_client_locale_tests COMMAND realmd_client_locale_tests)
+
     add_executable(realmd_auth_protocol_tests
         Tests/AuthProtocolGuardTests.cpp
         Auth/AuthProtocolGuard.cpp
@@ -155,6 +166,7 @@ if(WITH_TESTS OR BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
     target_link_libraries(realmd_patch_safety_tests PRIVATE
+        shared
         mangos_openssl
         mangos_openssl_strict
     )

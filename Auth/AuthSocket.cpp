@@ -57,6 +57,7 @@
 #include "AuthCodes.h"
 #include "AuthProtocolGuard.h"
 #include "AuthResultPolicy.h"
+#include "ClientLocale.h"
 #include "PatchArtifact.h"
 #include "PatchHandler.h"
 
@@ -576,13 +577,14 @@ bool AuthSocket::_HandleLogonChallenge()
     DEBUG_LOG("[AuthChallenge] got full packet, %#04x bytes", ch->size);
     DEBUG_LOG("[AuthChallenge] name(%d): '%s'", ch->I_len, ch->I);
 
+    auto const clientLocale = MaNGOS::Auth::ParseClientLocaleClaim(
+        std::string_view(reinterpret_cast<char const*>(ch->country), 4));
+
     // BigEndian code, nop in little endian case
     // size already converted
     EndianConvert(*((uint32*)(&ch->gamename[0])));
     EndianConvert(ch->build);
     EndianConvert(*((uint32*)(&ch->platform[0])));
-    EndianConvert(*((uint32*)(&ch->os[0])));
-    EndianConvert(*((uint32*)(&ch->country[0])));
     EndianConvert(ch->timezone_bias);
     EndianConvert(ch->ip);
 
@@ -746,13 +748,12 @@ bool AuthSocket::_HandleLogonChallenge()
                     uint8 secLevel = (*result)[4].GetUInt8();
                     _accountSecurityLevel = secLevel <= SEC_ADMINISTRATOR ? AccountTypes(secLevel) : SEC_ADMINISTRATOR;
 
-                    _localizationName.resize(4);
-                    for (int i = 0; i < 4; ++i)
-                    {
-                        _localizationName[i] = ch->country[4 - i - 1];
-                    }
-
-                    BASIC_LOG("[AuthChallenge] account %s is using '%c%c%c%c' locale (%u)", _login.c_str(), ch->country[3], ch->country[2], ch->country[1], ch->country[0], GetLocaleByName(_localizationName));
+                    _localizationName = clientLocale.value_or(std::string{});
+                    BASIC_LOG("[AuthChallenge] account %s is using '%s' locale (%u)",
+                        _login.c_str(),
+                        _localizationName.empty() ? "invalid" :
+                            _localizationName.c_str(),
+                        GetLocaleByName(_localizationName));
 
                     _status = STATUS_LOGON_PROOF;
                 }
@@ -881,17 +882,23 @@ bool AuthSocket::_HandleLogonProof()
         }
 
         ///- Update the sessionkey, last_ip, last login time and reset number of failed logins in the account table for this account
-        // No SQL injection (escaped user name and OS) and IP address as received by socket
+        // Locale and OS are escaped, the account name was escaped during the
+        // challenge, and the transport supplies the peer IP address.
         const char* K_hex = K.AsHexStr();
+        std::string safeLocale = _localizationName;
 
+        LoginDatabase.escape_string(safeLocale);
         LoginDatabase.escape_string(_os);
         if (!LoginDatabase.DirectPExecute(
             "UPDATE `account` SET `sessionkey` = '%s', `last_ip` = '%s', "
-            "`last_login` = NOW(), `locale` = '%u', `os` = '%s', "
+            "`last_login` = NOW(), `locale` = '%u', "
+            "`client_locale` = NULLIF('%s', ''), "
+            "`os` = '%s', "
             "`failed_logins` = 0 WHERE `username` = '%s'",
             K_hex,
             get_remote_address().c_str(),
             GetLocaleByName(_localizationName),
+            safeLocale.c_str(),
             _os.c_str(),
             _safelogin.c_str()))
         {
@@ -1012,6 +1019,9 @@ bool AuthSocket::_HandleReconnectChallenge()
     DEBUG_LOG("[ReconnectChallenge] got full packet, %#04x bytes", ch->size);
     DEBUG_LOG("[ReconnectChallenge] name(%d): '%s'", ch->I_len, ch->I);
 
+    auto const clientLocale = MaNGOS::Auth::ParseClientLocaleClaim(
+        std::string_view(reinterpret_cast<char const*>(ch->country), 4));
+
     _login.assign(reinterpret_cast<char const*>(ch->I), ch->I_len);
 
     _safelogin = _login;
@@ -1019,6 +1029,7 @@ bool AuthSocket::_HandleReconnectChallenge()
 
     EndianConvert(ch->build);
     _build = ch->build;
+    _localizationName = clientLocale.value_or(std::string{});
     _os = (const char*)ch->os;
 
     if (_os.size() > 4)
@@ -1087,6 +1098,22 @@ bool AuthSocket::_HandleReconnectProof()
 
     if (!memcmp(sha.GetDigest(), lp.R2, SHA_DIGEST_LENGTH))
     {
+        std::string safeLocale = _localizationName;
+        std::string safeOs = _os;
+        LoginDatabase.escape_string(safeLocale);
+        LoginDatabase.escape_string(safeOs);
+        if (!LoginDatabase.DirectPExecute(
+            "UPDATE `account` SET `client_locale` = NULLIF('%s', ''), "
+            "`os` = '%s' WHERE `username` = '%s'",
+            safeLocale.c_str(), safeOs.c_str(), _safelogin.c_str()))
+        {
+            sLog.outError(
+                "[Auth] Failed to publish reconnect client identity for "
+                "account %s", _login.c_str());
+            close_connection();
+            return false;
+        }
+
         ///- Sending response
         ByteBuffer pkt;
         pkt << (uint8)  CMD_AUTH_RECONNECT_PROOF;
